@@ -1,0 +1,18 @@
+# Never commit an installation, user documents, credentials, or test output.
+.local/
+data/
+backups/
+artifacts/
+node_modules/
+__pycache__/
+*.py[cod]
+*.sqlite*
+*.db
+*.log
+*.pem
+*.key
+.env
+.env.*
+.venv/
+.DS_Store
+dist/

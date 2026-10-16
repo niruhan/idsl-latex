@@ -1,0 +1,17 @@
+{
+  "tectonic": {
+    "version": "0.17.0",
+    "url": "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.17.0/tectonic-0.17.0-x86_64-unknown-linux-musl.tar.gz",
+    "sha256": "8533d07f9ccbd7a65824b9e0459041bca34af1eb33daba48f59215593753a3b7"
+  },
+  "cloudflared": {
+    "version": "2026.10.1",
+    "url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64",
+    "sha256": "3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586"
+  },
+  "bundle": {
+    "version": "default_bundle_v33",
+    "url": "https://data1b.fullyjustified.net/tlextras-2022.0r0.tar",
+    "sha256": "425685e124746c15ba9bb8e0596bdaad98fce886afa347fbcf9ec0e9acd7fe79"
+  }
+}
