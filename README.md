@@ -2,9 +2,24 @@
 
 A small, self-hosted LaTeX workspace for research groups. Edit source or simple text visually, browse project files, compile in an isolated environment, and preview or download the PDF beside your document.
 
+[Download the latest release](https://github.com/niruhan/idsl-latex/releases/latest) · [Set up your server](#download-and-run) · [See more screenshots](#screenshots)
+
+![IDSL Lab LaTeX with a project file tree, LaTeX source editor, and the compiled research paper displayed side by side](docs/images/workspace.png)
+
+*Your project files, source, and compiled PDF in one workspace.*
+
 Each member has their own account and private projects. Owners can share individual projects with editors or viewers. Registration requires an administrator-created invitation and an approved email address; no mail service is needed.
 
 **Supported host:** x86_64 Linux with Python 3.10+, systemd user services, cgroup v2, and unprivileged Bubblewrap namespaces. Tested on Ubuntu 22.04. Use a dedicated Linux VM for a public installation. Native Windows/macOS hosting and Docker deployment are not included in this release.
+
+## Screenshots
+
+| Edit visually | Organize your projects | Invite coauthors |
+| --- | --- | --- |
+| [![Visual editor showing editable headings and paragraphs next to the compiled PDF](docs/images/visual-editor.png)](docs/images/visual-editor.png) | [![Project picker with private papers, a New project button, and ZIP import](docs/images/projects.png)](docs/images/projects.png) | [![Project sharing dialog showing a demo owner and editor, plus invitation permissions](docs/images/sharing.png)](docs/images/sharing.png) |
+| Edit basic headings and paragraphs directly, then compile to check the typesetting. | Keep separate papers and notes, or bring an existing Overleaf project in as a ZIP. | Choose who can edit a paper and who can view it. |
+
+Click a screenshot to view it at full size. These are real captures of the app using a sample paper and fictional demo accounts. They contain no live lab documents, account details, or usable invitation links.
 
 ## Download and run
 
