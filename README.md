@@ -2,6 +2,31 @@
 
 A local workspace for writing LaTeX and Typst, with a project explorer, visual/source editing, and a PDF preview. Run it on your Mac or host it for a small research group.
 
+## Screenshots
+
+![Typst editor with source and compiled PDF](docs/images/typst-workspace.png)
+
+| Project explorer | Dark theme |
+| --- | --- |
+| [![Project explorer with LaTeX and Typst documents](docs/images/projects.png)](docs/images/projects.png) | [![Dark Typst editor](docs/images/dark-theme.png)](docs/images/dark-theme.png) |
+
+More views: [LaTeX](docs/images/workspace.png) · [Visual editor](docs/images/visual-editor.png) · [Project list](docs/images/projects-list.png) · [Mobile](docs/images/projects-mobile.png) · [Sharing](docs/images/sharing.png) · [GitHub backups](docs/images/github-backups.png).
+
+All screenshots use a temporary database, fictional demo accounts, and starter documents. They contain no real projects, credentials, or usable invitation links.
+
+## Features
+
+- **Project explorer:** cards or list, search, sorting, and filters for format and ownership. Click a project to edit; **My projects** saves and returns home.
+- **LaTeX + Typst:** source and basic visual editing, multi-file projects with collapsible folders, figures, and bibliographies.
+- **PDF preview:** manual or automatic compilation, clickable error locations, and PDF download.
+- **Sharing:** invite coauthors to individual projects with editor or view-only access.
+- **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.
+- **GitHub backups:** keep all projects in one repository or use a separate repository per document; optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
+- **Import/export:** import project ZIPs (including Overleaf exports), upload assets, and download complete source ZIPs.
+- **Themes:** switch light/dark with one click on the sun/moon button; **Account → Appearance** also offers **System**.
+
+Visual mode supports basic headings, paragraphs, emphasis, and Typst lists. Advanced equations/templates remain editable in source cards. The Typst sample belongs to your account; repeat visits preserve edits and avoid duplicates.
+
 ## Quick start on macOS
 
 **Requires Python 3.10+** on Apple Silicon or Intel. Check with `python3 --version`; install Python from [python.org](https://www.python.org/downloads/macos/) if needed. Git is needed for cloning; you can also [download the source ZIP](https://github.com/niruhan/idsl-latex/archive/refs/heads/main.zip).
@@ -25,31 +50,6 @@ Use `./labtex stop` to stop and `./labtex start` to return later. Already cloned
 ## Install on Linux
 
 Shared hosting requires x86_64 Linux, Python 3.10+, systemd, cgroup v2, and Bubblewrap. Follow the **[Linux installation guide](docs/INSTALL_LINUX.md)** for prerequisites, setup, invitations, and optional HTTPS access. The Mac runner is for personal, local use.
-
-## Features
-
-- **Project explorer:** cards or list, search, sorting, and filters for format and ownership. Click a project to edit; **My projects** saves and returns home.
-- **LaTeX + Typst:** source and basic visual editing, multi-file projects with collapsible folders, figures, and bibliographies.
-- **PDF preview:** manual or automatic compilation, clickable error locations, and PDF download.
-- **Sharing:** invite coauthors to individual projects with editor or view-only access.
-- **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.
-- **GitHub backups:** keep all projects in one repository or use a separate repository per document; optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
-- **Import/export:** import project ZIPs (including Overleaf exports), upload assets, and download complete source ZIPs.
-- **Themes:** switch light/dark with one click on the sun/moon button; **Account → Appearance** also offers **System**.
-
-Visual mode supports basic headings, paragraphs, emphasis, and Typst lists. Advanced equations/templates remain editable in source cards. The Typst sample belongs to your account; repeat visits preserve edits and avoid duplicates.
-
-## Screenshots
-
-![Typst editor with source and compiled PDF](docs/images/typst-workspace.png)
-
-| Project explorer | Dark theme |
-| --- | --- |
-| [![Project explorer with LaTeX and Typst documents](docs/images/projects.png)](docs/images/projects.png) | [![Dark Typst editor](docs/images/dark-theme.png)](docs/images/dark-theme.png) |
-
-More views: [LaTeX](docs/images/workspace.png) · [Visual editor](docs/images/visual-editor.png) · [Project list](docs/images/projects-list.png) · [Mobile](docs/images/projects-mobile.png) · [Sharing](docs/images/sharing.png) · [GitHub backups](docs/images/github-backups.png).
-
-All screenshots use a temporary database, fictional demo accounts, and starter documents. They contain no real projects, credentials, or usable invitation links.
 
 ## Guides
 
