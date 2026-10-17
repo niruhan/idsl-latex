@@ -1,12 +1,16 @@
 # Local LaTeX + Typst workspace on macOS
 
-Python 3.10 or newer is the only prerequisite. Apple Silicon and Intel Macs are supported. There is no npm build, Docker, database service, or system-wide TeX installation.
+Python 3.10 or newer is the runtime prerequisite. Check `python3 --version`; if missing or older, install a current Python 3 from [python.org](https://www.python.org/downloads/macos/). Git is needed only for cloning; a [source ZIP](https://github.com/niruhan/idsl-latex/archive/refs/heads/main.zip) works too. Apple Silicon and Intel Macs are supported. There is no npm build, Docker, database service, or system-wide TeX installation.
 
 ```sh
+git clone https://github.com/niruhan/idsl-latex.git
+cd idsl-latex
 ./labtex setup
 ./labtex start
 ./labtex setup-token
 ```
+
+Skip the clone step for an existing checkout. If a ZIP extractor loses executable permissions, use `python3 labtex` in place of `./labtex`.
 
 Open **http://127.0.0.1:8765** and create your account using the setup token. Choose your own password. The first account is the administrator; subsequent starts show the sign-in screen. `./labtex start --port 8877` selects another port.
 
@@ -25,6 +29,24 @@ Setup installs pinned, SHA-256-verified **Typst 0.15.1** and **Tectonic 0.17.0**
 | `./labtex test` | Run backend tests with the installed compilers |
 
 The local server binds only to `127.0.0.1`. It is intended for your own trusted projects on your Mac. It uses Tectonic's untrusted mode, Typst's project root restriction, temporary build directories, a dedicated compiler home, and time/output limits. It does **not** provide the Linux deployment's OS sandbox or resource isolation. Keep shared/public installations on the documented Linux host. Closing the browser retains your files; the server runs until stopped, logout, or restart. Run `start` again after restarting your Mac.
+
+## Your project home
+
+After signing in, you land on the project explorer. Browse cards or switch to a compact list; search by project name or main filename, sort by last edit or name, and filter your own projects, shared projects, LaTeX, or Typst. The view choice is remembered in your browser.
+
+![Project explorer with LaTeX and Typst cards](images/projects.png)
+
+[A compact list view](images/projects-list.png) and [the mobile layout](images/projects-mobile.png) are also available.
+
+Click a project to enter its editor. **My projects** returns to the explorer after saving your edits. Browser Back/Forward and direct project links also work; reloading an editor keeps that project open.
+
+The first home visit creates a private **Getting started with Typst** sample for your account, with an included section, an equation, and bibliography. Click its card or **Open sample** to edit and compile it. Returning home preserves your sample edits and does not create duplicates. Deleting it keeps it deleted until you explicitly choose **Open sample** again. The sample counts toward your 25-project limit and is only added when space is available.
+
+## Appearance
+
+Use the sun/moon control beside your avatar, or **Account → Appearance**, to choose **Light**, **Dark**, or **System**. System follows the device appearance and updates when it changes. The choice is remembered in this browser, synchronizes between its open tabs, and also applies to the sign-in screen. The editor theme changes interface colors; PDFs retain the colors defined by the document source.
+
+![Dark Typst editor with document preview](images/dark-theme.png)
 
 ## Write in either format
 
@@ -57,7 +79,7 @@ To restore source, download the repository ZIP from GitHub. For the shared layou
 
 ## Browser validation
 
-Install Playwright outside this repository and use Node 20 or newer. `tests/run_browser.py` starts a disposable database and runs both LaTeX and Typst browser regressions; it never touches `data/` or writes to GitHub.
+Install Playwright outside this repository and use Node 20 or newer. `tests/run_browser.py` starts a disposable database and runs the project-home, theme, LaTeX, and Typst browser regressions; it never touches `data/` or writes to GitHub.
 
 ```sh
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \

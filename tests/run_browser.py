@@ -2,6 +2,7 @@
 
 Set PLAYWRIGHT_MODULE and NODE_BIN to your external Playwright installation.
 """
+import argparse
 import os
 from pathlib import Path
 import socket
@@ -16,6 +17,10 @@ from deploy.local import environment, ROOT
 
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--screenshots',action='store_true',help='Capture documentation images using a fresh fictional demo account')
+    args=parser.parse_args()
+    scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs')
     with tempfile.TemporaryDirectory(prefix='labtex-browser-') as folder:
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
@@ -32,7 +37,7 @@ def main():
                     with urllib.request.urlopen(origin + '/api/session', timeout=1): break
                 except OSError: time.sleep(.1)
             else: raise RuntimeError('Browser test server did not start: ' + log_path.read_text())
-            for script in ('browser_smoke.cjs', 'browser_typst.cjs'):
+            for script in scripts:
                 subprocess.run([os.getenv('NODE_BIN', 'node'), str(ROOT / 'tests' / script)], env=env, cwd=ROOT, check=True)
         finally:
             server.terminate()

@@ -1,0 +1,80 @@
+/* The document preview keeps the colors defined by its LaTeX/Typst source. */
+:root{color-scheme:light}
+.theme-button{display:inline-flex;align-items:center;justify-content:center;width:31px;height:31px;flex:none;border:1px solid #789889;border-radius:50%;font-size:18px;color:inherit}
+.theme-button:hover{background:#ffffff12}
+.auth-side{position:relative}
+.auth-theme-toggle{position:absolute;top:25px;right:25px;color:var(--muted);border-color:var(--line)}
+.theme-note{margin:16px 0 0;font-size:11px;color:var(--muted)}
+html[data-theme=dark]{color-scheme:dark;--forest:#10271f;--green:#9acdab;--mint:#2b4635;--ink:#d7e5da;--muted:#96aa98;--line:#34483a;--paper:#17261d;background:#111c15}
+html[data-theme=dark] body{background:#111c15}
+html[data-theme=dark] button:hover{background:#2a4030}
+html[data-theme=dark] .primary{background:#94c5a4;color:#10251a}
+html[data-theme=dark] .primary:hover{background:#afd9bc}
+html[data-theme=dark] .outline{background:#1c2e22;border-color:#40553f;color:#d5e4d7}
+html[data-theme=dark] .outline:hover{background:#2b4230}
+html[data-theme=dark] .topbar,html[data-theme=dark] .home-topbar{border-bottom:1px solid #2c4032}
+html[data-theme=dark] .topbar button:hover,html[data-theme=dark] .home-topbar button:hover{background:#294333}
+html[data-theme=dark] .compile{background:#94c5a4;color:#10251a;border-color:#afd9bc}
+html[data-theme=dark] .topbar .compile:hover{background:#afd9bc}
+html[data-theme=dark] #projectHome{background:#142219}
+html[data-theme=dark] .home-sidebar,html[data-theme=dark] .sidebar{background:#17291e}
+html[data-theme=dark] .home-nav.active,html[data-theme=dark] .tree-file.active{background:#2a4431;color:#c1e5c8}
+html[data-theme=dark] .home-nav.active>span{color:#b6d9b8}
+html[data-theme=dark] .home-nav small{background:#3b5d41;color:#d0e7cc}
+html[data-theme=dark] .home-nav>span,html[data-theme=dark] .file-icon,html[data-theme=dark] .project-open{color:#9bb98f}
+html[data-theme=dark] .home-heading h1,html[data-theme=dark] .home-sample h2,html[data-theme=dark] .project-details h2,html[data-theme=dark] .projects-empty h2{color:#d4e6ce}
+html[data-theme=dark] .home-sample{background:#213923;border-color:#3d5535}
+html[data-theme=dark] .sample-symbol{background:#e4ecd9;box-shadow:5px 5px 0 #3c5731}
+html[data-theme=dark] .home-sample .outline{background:#294330;border-color:#536d46;color:#d6e5ce}
+html[data-theme=dark] .home-sample .outline:hover{background:#38583b}
+html[data-theme=dark] .project-search,html[data-theme=dark] .project-sort select,html[data-theme=dark] .view-switch{background:#1a2c20;border-color:#3b513c;color:#d5e3d4}
+html[data-theme=dark] .project-search input{color:#d5e3d4}
+html[data-theme=dark] .view-switch button.active{background:#3c5b3a;color:#d3e7c9}
+html[data-theme=dark] .project-entry{background:#1c2f21;border-color:#3a4e36}
+html[data-theme=dark] .project-entry:hover{border-color:#78966b;box-shadow:0 7px 22px #0003}
+html[data-theme=dark] .project-cover{background:#2b4028;border-color:#3a4e36}
+html[data-theme=dark] .project-cover.latex{background:#3a3826}
+html[data-theme=dark] .project-format{background:#243a22;border-color:#576e45;color:#c0d7a7}
+html[data-theme=dark] .latex .project-format{background:#3d3a27;border-color:#706340;color:#ddcda2}
+html[data-theme=dark] .project-sample-badge{color:#c1d7ab}
+html[data-theme=dark] .project-owner{border-color:#354a32}
+html[data-theme=dark] .project-owner .owner-dot{background:#385032;color:#cee0bd}
+html[data-theme=dark] .projects-empty{background:#1a2c1e;border-color:#4c6743}
+html[data-theme=dark] .home-heading p,html[data-theme=dark] .home-sample p,html[data-theme=dark] .home-sample .eyebrow,html[data-theme=dark] .project-summary,html[data-theme=dark] .project-summary span:last-child,html[data-theme=dark] .project-meta,html[data-theme=dark] .project-owner,html[data-theme=dark] .home-footer,html[data-theme=dark] .home-sidebar-foot,html[data-theme=dark] .home-sidebar-foot small{color:#a0b295}
+html[data-theme=dark] .editor-pane{background:#17251c}
+html[data-theme=dark] .pane-header,html[data-theme=dark] .file-breadcrumb,html[data-theme=dark] .editor-footer,html[data-theme=dark] .format-toolbar{background:#1a2c20;border-color:#354638}
+html[data-theme=dark] .tabs button{color:#9aac98}
+html[data-theme=dark] .tabs button.active{color:#b9dfb9;border-color:#89b18a}
+html[data-theme=dark] .source-editor,html[data-theme=dark] .visual-editor,html[data-theme=dark] .binary-preview{background:#15251a}
+html[data-theme=dark] #highlight,html[data-theme=dark] #code.plain{color:#cbdcc7}
+html[data-theme=dark] #code{caret-color:#d7e5da}
+html[data-theme=dark] #highlight .command{color:#8ecdc2}
+html[data-theme=dark] #highlight .comment{color:#92a586}
+html[data-theme=dark] #highlight .brace{color:#d1ac7b}
+html[data-theme=dark] #highlight .math{color:#cba0bd}
+html[data-theme=dark] #code::selection{background:#648d6580}
+html[data-theme=dark] #lineNumbers{background:#192b1d;color:#819477;border-color:#344832}
+html[data-theme=dark] .split-handle{background:#334d34}
+html[data-theme=dark] .split-handle:hover{background:#587b50}
+html[data-theme=dark] .raw-block{background:#213722;border-color:#42583b}
+html[data-theme=dark] .raw-block textarea{color:#b4c7a7}
+html[data-theme=dark] .raw-block>label,html[data-theme=dark] .visual-note,html[data-theme=dark] .editor-footer,html[data-theme=dark] .file-breadcrumb,html[data-theme=dark] .file-breadcrumb span:first-child,html[data-theme=dark] .format-toolbar #saveButton{color:#a0b296}
+html[data-theme=dark] .visual-block h2[contenteditable]{color:#c5e0b9}
+html[data-theme=dark] .preview-pane,html[data-theme=dark] .preview-content{background:#111c15}
+html[data-theme=dark] .preview-pane .pane-header,html[data-theme=dark] .preview-footer,html[data-theme=dark] .statusbar,html[data-theme=dark] #logPanel{background:#1b2e20;border-color:#364a36;color:#a3b69a}
+html[data-theme=dark] .build-status{color:#b3c4a8}
+html[data-theme=dark] .build-status.failed,html[data-theme=dark] .diagnostic{color:#e4ad8c}
+html[data-theme=dark] .build-status.stale{color:#d4bf86}
+html[data-theme=dark] .pdf-empty,html[data-theme=dark] .pdf-empty h2{color:#aec9a4}
+html[data-theme=dark] .paper-icon{background:#29412b;border-color:#506747;color:#c2d7b3}
+html[data-theme=dark] .file-filter,html[data-theme=dark] .sidebar-foot select,html[data-theme=dark] dialog input,html[data-theme=dark] dialog select,html[data-theme=dark] dialog textarea,html[data-theme=dark] .auth-side input{background:#142319;border-color:#40533c;color:#d5e4d2}
+html[data-theme=dark] input::placeholder,html[data-theme=dark] textarea::placeholder{color:#91a28a}
+html[data-theme=dark] dialog{background:#1b2e20;box-shadow:0 25px 90px #0008}
+html[data-theme=dark] dialog::backdrop{background:#06120bcc}
+html[data-theme=dark] dialog p,html[data-theme=dark] .member-row small,html[data-theme=dark] .hint,html[data-theme=dark] .auth-side p,html[data-theme=dark] .auth-side small{color:#a8bb9e}
+html[data-theme=dark] .badge{background:#3b5737;color:#cbe0ba}
+html[data-theme=dark] .danger,html[data-theme=dark] .error{color:#e8a28e}
+html[data-theme=dark] .welcome{background:#10271f}
+html[data-theme=dark] .text-button{color:#b4d3a5}
+html[data-theme=dark] .diagnostic:hover{background:#314b32}
+@media(max-width:700px){.topbar{gap:6px}.topbar .theme-button{width:26px;height:26px;font-size:16px}}

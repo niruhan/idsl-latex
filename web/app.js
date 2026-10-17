@@ -1,7 +1,8 @@
 import {escapeHTML as esc,renderVisual,renderTypstVisual} from './visual.js';
 const $=id=>document.getElementById(id);
 const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,githubToken:'',backupAuto:false};
-let saveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false;const backupTimers=new Map();
+const Home={visible:false,projects:[],sampleId:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
+let saveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false,navigationId=0;const backupTimers=new Map();
 const isTypst=()=>S.file?.path.endsWith('.typ');
 const isDocument=()=>/\.(tex|typ)$/.test(S.file?.path||'');
 function scheduleCompile(){clearTimeout(autoTimer);if(!$('autoCompile').checked||!editable())return;if(S.building){compileAgain=true;return;}autoTimer=setTimeout(()=>compile().catch(fail),900);}
@@ -51,19 +52,73 @@ function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toL
  const b=document.createElement('button');b.className='tree-file'+(S.file?.path===f.path?' active':'');b.title=f.path;const ext=f.path.split('.').pop();b.innerHTML=`<span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(parts.at(-1))}</span>${f.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',()=>loadFile(f.path).catch(fail));tree.append(b);
  });$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';$('mainFile').innerHTML=S.project.files.filter(f=>/\.(tex|typ)$/.test(f.path)).map(f=>`<option value="${esc(f.path)}">${esc(f.path)}</option>`).join('');$('mainFile').value=S.project.main;
 }
-async function loadFile(path,force=false){if(!force&&(!await save()))return;const f=await api(apiPath('file')+'?path='+encodeURIComponent(path));S.file=f;S.text=f.content??'';S.saved=S.text;S.dirty=false;S.conflict=false;$('filePath').textContent=path;$('fileType').textContent=path.endsWith('.typ')?'Typst':path.endsWith('.tex')?'LaTeX':path.split('.').pop().toUpperCase();$('code').setAttribute('aria-label',isTypst()?'Typst source':'LaTeX source');$('visualTab').disabled=!isDocument();if(!isDocument())S.mode='source';document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable()||!isDocument());$('binaryPreview').hidden=f.content!==null;$('code').readOnly=!editable();markSaved('All changes saved');
+async function loadFile(path,force=false){if(!force&&(!await save()))return;const pid=S.project.id;const f=await api(apiPath('file')+'?path='+encodeURIComponent(path));if(S.project?.id!==pid)return;S.file=f;S.text=f.content??'';S.saved=S.text;S.dirty=false;S.conflict=false;$('filePath').textContent=path;$('fileType').textContent=path.endsWith('.typ')?'Typst':path.endsWith('.tex')?'LaTeX':path.split('.').pop().toUpperCase();$('code').setAttribute('aria-label',isTypst()?'Typst source':'LaTeX source');$('visualTab').disabled=!isDocument();if(!isDocument())S.mode='source';document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable()||!isDocument());$('binaryPreview').hidden=f.content!==null;$('code').readOnly=!editable();markSaved('All changes saved');
  if(f.content===null){const ext=path.split('.').pop().toLowerCase();const mimes={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',pdf:'application/pdf'};$('binaryPreview').replaceChildren();if(mimes[ext]){const el=document.createElement(ext==='pdf'?'iframe':'img');el.src='data:'+mimes[ext]+';base64,'+f.base64;el.alt=path;el.title=path;$('binaryPreview').append(el);}else $('binaryPreview').textContent='Binary asset · Included when compiling and exporting the project.';
  }else{let draft;try{draft=JSON.parse(sessionStorage.getItem(draftKey()));}catch{}if(draft&&draft.content!==f.content){S.text=draft.content;S.dirty=true;markSaved('Recovered browser draft','dirty');if(draft.revision!==f.revision){S.conflict=true;await showConflict();}else{toast('Recovered your unsaved draft.');saveTimer=setTimeout(()=>save().catch(fail),1000);}}}
  editorMode(S.mode);renderFiles();updateStats();
 }
-async function openProject(pid){if(S.project&&!await save())return;clearTimeout(autoTimer);S.project=await api('/api/projects/'+pid);S.file=null;S.dirty=false;S.pdfKey=null;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Lab';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile','saveButton'])$(id).disabled=!editable();document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable());$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await loadFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path,true);updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||(localStorage.getItem('labtex-auto:'+pid)===null&&S.project.main.endsWith('.typ'));$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();if($('autoCompile').checked&&!S.project.build)scheduleCompile();if(!S.invite)history.replaceState(null,'','#project='+pid);}
+async function openProject(pid,{historyMode='push'}={}){if(S.project&&!await save())return;const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Lab';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile','saveButton'])$(id).disabled=!editable();document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable());$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await loadFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path,true);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||(localStorage.getItem('labtex-auto:'+pid)===null&&S.project.main.endsWith('.typ'));$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();if($('autoCompile').checked&&!S.project.build)scheduleCompile();if(!S.invite)setProjectRoute('#project='+pid,historyMode);}
+// A fresh browsing context keeps PDF loads out of page Back/Forward history.
+// Unloading it on the home page also releases the native PDF viewer.
+function replacePdfFrame(src=null){
+ const previous=$('pdfFrame');
+ if(src&&previous.getAttribute('src')===src)return;
+ const frame=previous.cloneNode(false);frame.removeAttribute('src');frame.hidden=true;
+ if(src)frame.src=src;
+ previous.replaceWith(frame);
+}
 function updateBuild(force=false){if(!S.project)return;const b=S.project.build;const stale=S.dirty||b&&b.revision!==S.project.revision;$('downloadButton').disabled=!b?.success;$('openPdfButton').disabled=!b?.success;if(S.building)return;
  $('buildStatus').textContent=b?(b.success?(stale?'Changes since last build':`Compiled in ${b.seconds}s`):'Build failed'):'Ready to compile';$('buildStatus').className='build-status '+(b&&!b.success?'failed':stale?'stale':'');$('logBadge').textContent=b&&!b.success?'●':'';
- if(b?.success){const key=S.project.id+':'+b.created;if(force||S.pdfKey!==key){S.pdfKey=key;$('pdfFrame').src=apiPath('pdf')+'?v='+b.created+'#toolbar=0&view=FitH';}$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else{$('pdfEmpty').hidden=false;$('pdfFrame').hidden=true;}
+ if(b?.success){const key=S.project.id+':'+b.created;if(force||S.pdfKey!==key){S.pdfKey=key;replacePdfFrame(apiPath('pdf')+'?v='+b.created+'#toolbar=0&view=FitH');}$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else{$('pdfEmpty').hidden=false;$('pdfFrame').hidden=true;}
 }
-async function compile(){if(!S.project||S.building||!editable())return;if(!await save())return;clearTimeout(autoTimer);const buildPid=S.project.id;S.building=true;$('compileButton').disabled=true;$('firstCompileButton').disabled=true;$('compileButton').querySelector('span').textContent='Compiling…';$('buildStatus').textContent='Building PDF…';$('buildStatus').className='build-status';
- try{const result=await api('/api/projects/'+buildPid+'/compile','POST',{});if(S.project.id!==buildPid){toast(result.success?'Previous project compiled successfully.':'Previous project build failed. Open its build log for details.');return;}$('buildLog').textContent=result.log;renderDiagnostics(result.log);S.project=await api('/api/projects/'+buildPid);updateBuild(true);if(!result.success){$('logPanel').hidden=false;toast('Compilation failed. The build log has the details.');}else toast(`PDF compiled in ${result.seconds}s.`);}catch(e){$('buildLog').textContent=e.message;$('logPanel').hidden=false;throw e;}finally{S.building=false;$('compileButton').disabled=!editable();$('firstCompileButton').disabled=!editable();$('compileButton').querySelector('span').textContent='Compile';updateBuild();if(compileAgain){compileAgain=false;scheduleCompile();}}}
-async function projects(){if(S.project&&!await save())return;const r=await api('/api/projects');modal('My projects',`<p>Create a LaTeX or Typst project, or import an existing project ZIP. Share individual projects when you want to collaborate.</p><div class="row"><button id="createProject" class="primary">＋ New project</button><button id="importProject" class="outline">↥ Import ZIP</button></div><div id="projectList">${r.projects.map(p=>`<button class="project-card" data-project="${p.id}"><span class="project-icon">${p.main.endsWith('.typ')?'Typ':'TeX'}</span><div><h3>${esc(p.name)}</h3><small>${esc(p.role)} · Updated ${new Date(p.updated*1000).toLocaleDateString()}</small></div><span class="arrow">→</span></button>`).join('')||'<p class="empty-state">No projects yet. Create your first one.</p>'}</div>`);document.querySelectorAll('[data-project]').forEach(b=>b.addEventListener('click',()=>openProject(b.dataset.project).catch(fail)));action('createProject',newProject);action('importProject',()=>$('importZip').click());}
+async function compile(){if(!S.project||S.building||!editable())return;const buildPid=S.project.id;if(!await save()||S.project?.id!==buildPid)return;clearTimeout(autoTimer);S.building=true;$('compileButton').disabled=true;$('firstCompileButton').disabled=true;$('compileButton').querySelector('span').textContent='Compiling…';$('buildStatus').textContent='Building PDF…';$('buildStatus').className='build-status';
+ try{const result=await api('/api/projects/'+buildPid+'/compile','POST',{});if(S.project?.id!==buildPid){toast(result.success?'Previous project compiled successfully.':'Previous project build failed. Open its build log for details.');return;}$('buildLog').textContent=result.log;renderDiagnostics(result.log);const project=await api('/api/projects/'+buildPid);if(S.project?.id!==buildPid)return;S.project=project;updateBuild(true);if(!result.success){$('logPanel').hidden=false;toast('Compilation failed. The build log has the details.');}else toast(`PDF compiled in ${result.seconds}s.`);}catch(e){$('buildLog').textContent=e.message;$('logPanel').hidden=false;throw e;}finally{S.building=false;$('compileButton').disabled=!editable();$('firstCompileButton').disabled=!editable();$('compileButton').querySelector('span').textContent='Compile';updateBuild();if(compileAgain){compileAgain=false;scheduleCompile();}}}
+async function projects({historyMode='push'}={}){
+ if(S.project&&!await save())return;
+ ++navigationId;clearTimeout(autoTimer);
+ S.project=null;S.file=null;S.dirty=false;S.pdfKey=null;replacePdfFrame();
+ $('workspace').hidden=true;$('auth').hidden=true;$('projectHome').hidden=false;
+ Home.visible=true;closeModal();document.title='Projects · IDSL Lab';
+ setProjectRoute('#projects',historyMode);
+ $('projectCount').textContent='Loading projects…';
+ const sample=await api('/api/sample-project','POST',{});Home.sampleId=sample.id;
+ await refreshProjects();
+}
+function setProjectRoute(hash,mode='push'){
+ if(mode==='none'||location.hash===hash)return;
+ history[mode==='replace'?'replaceState':'pushState'](null,'',hash);
+}
+async function refreshProjects(){
+ const response=await api('/api/projects');Home.projects=response.projects;renderProjects();
+}
+function renderProjects(){
+ const term=$('projectSearch').value.trim().toLocaleLowerCase();
+ const names={all:'All projects',owned:'My projects',shared:'Shared with me',typst:'Typst projects',latex:'LaTeX projects'};
+ const matches=Home.projects.filter(p=>{
+  const typst=p.main.endsWith('.typ');
+  const filter=Home.filter==='all'||Home.filter==='owned'&&p.role==='owner'||Home.filter==='shared'&&p.role!=='owner'||Home.filter==='typst'&&typst||Home.filter==='latex'&&!typst;
+  return filter&&[p.name,p.main,typst?'typst':'latex'].join(' ').toLocaleLowerCase().includes(term);
+ }).sort((a,b)=>Home.sort==='name'?a.name.localeCompare(b.name):b.updated-a.updated||a.name.localeCompare(b.name));
+ $('homeHeading').textContent=names[Home.filter];$('allProjectsCount').textContent=Home.projects.length;
+ $('projectCount').textContent=`${matches.length} project${matches.length===1?'':'s'}`+(term?' matching your search':'');
+ $('projectList').className='project-browser '+(Home.view==='list'?'list-view':'grid-view');
+ $('projectGridView').classList.toggle('active',Home.view!=='list');$('projectGridView').setAttribute('aria-pressed',String(Home.view!=='list'));
+ $('projectListView').classList.toggle('active',Home.view==='list');$('projectListView').setAttribute('aria-pressed',String(Home.view==='list'));
+ document.querySelectorAll('[data-project-filter]').forEach(button=>{const active=button.dataset.projectFilter===Home.filter;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
+ const list=$('projectList');list.replaceChildren();
+ for(const project of matches){
+  const typst=project.main.endsWith('.typ'),sample=project.id===Home.sampleId;
+  const link=document.createElement('a');link.className='project-entry';link.href='#project='+project.id;link.dataset.project=project.id;
+  const date=new Date(project.updated*1000);
+  const updated=date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()!==new Date().getFullYear()?{year:'numeric'}:{})});
+  const role=project.role==='owner'?'Owned by you':project.role==='editor'?'Shared · Can edit':'Shared · View only';
+  link.innerHTML=`<div class="project-cover ${typst?'typst':'latex'}" aria-hidden="true"><span class="project-format">${typst?'Typst':'LaTeX'}</span>${sample?'<span class="project-sample-badge">SAMPLE</span>':''}<div class="project-page"><span class="project-page-title">${typst?'Aa':'TᴇX'}</span><span class="project-page-line"></span><span class="project-page-line short"></span><span class="project-page-equation">x = √α · x₀</span><span class="project-page-line"></span><span class="project-page-line short"></span></div></div><div class="project-details"><h2 title="${esc(project.name)}">${esc(project.name)}</h2><div class="project-meta"><span>${esc(project.main)}</span><time datetime="${date.toISOString()}" title="${esc(date.toLocaleString())}">${esc(updated)}</time></div><div class="project-owner"><span><span class="owner-dot" aria-hidden="true">${project.role==='owner'?'Y':'S'}</span>${role}</span><span class="project-open" aria-hidden="true">↗</span></div></div>`;
+  link.addEventListener('click',event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();openProject(project.id).catch(fail);});list.append(link);
+ }
+ $('projectsEmpty').hidden=matches.length>0;
+ $('projectsEmpty').querySelector('h2').textContent=term?'No matching projects.':Home.filter==='shared'?'Nothing shared with you yet.':'No projects here yet.';
+ $('projectsEmptyText').textContent=term?'Try another name, or choose a different filter.':Home.filter==='shared'?'Projects your coauthors share with you will appear here.':'Create a project or import an existing ZIP to get started.';
+}
 function newProject(){modal('A new beginning',`<form id="newProjectForm"><label>Project name<input name="name" placeholder="My research paper" required maxlength="120" autofocus></label><label>Document format<select name="format"><option value="typst">Typst · fast preview & readable markup</option><option value="latex">LaTeX · Overleaf compatible</option></select></label><label>Start with<select name="template"><option value="true">Research starter · equations & bibliography</option><option value="false">Blank article</option></select></label><div class="actions"><button class="primary">Create project</button></div></form>`);$('newProjectForm').addEventListener('submit',async e=>{e.preventDefault();const form=new FormData(e.target);try{const r=await api('/api/projects','POST',{name:form.get('name'),format:form.get('format'),template:form.get('template')==='true'});await openProject(r.id);}catch(e){fail(e);}});}
 async function share(){const r=await api(apiPath('members'));const owner=S.project.role==='owner';modal('A paper is better together',`<p>Everyone invited can access this project on your lab server. Editor invitations allow changes; viewer invitations are read-only.</p><div>${r.members.map(m=>`<div class="member-row"><div><strong>${esc(m.name)}</strong><small>${esc(m.email)}</small></div><span class="badge">${esc(m.role)}</span>${owner&&m.role!=='owner'?`<button class="icon danger" data-remove="${m.id}" title="Remove member">×</button>`:''}</div>`).join('')}</div>${owner?'<label style="margin-top:22px">Invite a coauthor<select id="inviteRole"><option value="editor">Can edit and compile</option><option value="viewer">Can view and download</option></select></label><button id="createInvite" class="primary full">Create invitation link</button><div id="inviteResult"></div><p class="hint">Each link is single-use and expires after 7 days. Share it directly with the intended person.</p>':'<p>Only the project owner can invite or remove members.</p>'}`);
  if(owner){action('createInvite',async()=>{const invite=await api(apiPath('invite'),'POST',{role:$('inviteRole').value});$('inviteResult').innerHTML='<label style="margin-top:18px">Invitation link<input id="inviteUrl" readonly></label><button id="copyInvite" class="outline full">Copy link</button>';$('inviteUrl').value=invite.url;action('copyInvite',async()=>{try{await navigator.clipboard.writeText(invite.url);toast('Invitation link copied.');}catch{$('inviteUrl').select();toast('Select and copy the invitation link.');}});});document.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',async()=>{if(!confirm('Remove this member from the project?'))return;try{await api(apiPath('members'),'DELETE',{userId:b.dataset.remove});await share();}catch(e){fail(e);}}));}}
@@ -86,14 +141,14 @@ async function labSignupDialog(links=[]){
 }
 async function authenticate(){
  const session=await api('/api/session');S.user=session.user;S.demo=session.demo;S.canInviteLab=session.canInviteLab;
- if(!S.user){$('auth').hidden=false;$('workspace').hidden=true;S.authMode=session.needsSetup?'setup':S.signup?'register':'login';renderAuth();return;}
- $('auth').hidden=true;$('workspace').hidden=false;
- $('accountButton').textContent=S.user.name.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();
+ if(!S.user){$('auth').hidden=false;$('workspace').hidden=true;$('projectHome').hidden=true;Home.visible=false;S.authMode=session.needsSetup?'setup':S.signup?'register':'login';renderAuth();return;}
+ $('auth').hidden=true;
+ $('accountButton').textContent=S.user.name.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();$('homeAccountButton').textContent=$('accountButton').textContent;$('homeUserName').textContent=S.user.name;
  $('previewLabel').textContent=S.demo?'LOCAL PREVIEW · Use normal mode for lab accounts':'IDSL Lab · LaTeX + Typst';
  let pid=new URLSearchParams(location.hash.slice(1)).get('project');
  if(S.invite&&!S.demo){const joined=await api('/api/join','POST',{token:S.invite});pid=joined.id;S.invite=null;history.replaceState(null,'','#project='+pid);toast('You joined the project.');}
  if(S.signup){S.signup=null;history.replaceState(null,'',location.pathname);}
- const r=await api('/api/projects');if(r.projects.length){await openProject(r.projects.find(p=>p.id===pid)?.id||r.projects[0].id);}else await projects();
+ if(pid){const r=await api('/api/projects');if(r.projects.some(p=>p.id===pid)){await openProject(pid,{historyMode:'replace'});return;}}await projects({historyMode:'replace'});
 }
 function renderAuth(){
  const mode=S.authMode;
@@ -119,21 +174,23 @@ action('authToggle',()=>{S.authMode=S.authMode==='login'?'register':'login';rend
 window.addEventListener('hashchange',async()=>{
  const params=new URLSearchParams(location.hash.slice(1));
  try{
-  if(S.dirty&&!await save())return;
+  if(S.dirty&&!await save()){if(S.project)setProjectRoute('#project='+S.project.id,'replace');return;}
   if(params.has('invite')||params.has('signup')){S.invite=params.get('invite');S.signup=params.get('signup');await authenticate();}
-  else if(S.user&&params.has('project')&&params.get('project')!==S.project?.id)await openProject(params.get('project'));
+  else if(S.user&&params.has('project')&&params.get('project')!==S.project?.id)await openProject(params.get('project'),{historyMode:'none'});
+  else if(S.user&&!params.has('project'))await projects({historyMode:'none'});
  }catch(e){fail(e);}
 });
 action('closeModal',closeModal);action('projectsButton',projects);action('projectsNavButton',projects);action('sourceTab',()=>editorMode('source'));action('visualTab',()=>editorMode('visual'));action('saveButton',save);action('compileButton',compile);action('firstCompileButton',compile);action('shareButton',share);action('backupButton',backupDialog);action('historyButton',historyDialog);action('newFileButton',addFile);action('fileMenuButton',fileMenu);action('uploadButton',()=>$('uploadFiles').click());
 action('downloadButton',()=>{if(S.project?.build?.success)location.href=apiPath('pdf')+'?download=1';});action('openPdfButton',()=>{if(S.project?.build?.success)window.open(apiPath('pdf'),'_blank','noopener');});action('exportSourceButton',async()=>{if(await save())location.href=apiPath('source.zip');});action('logButton',async()=>{$('logPanel').hidden=!$('logPanel').hidden;if(!$('logPanel').hidden&&S.project?.build){const log=await api(apiPath('log'));$('buildLog').textContent=log.log;renderDiagnostics(log.log);}});action('closeLog',()=>$('logPanel').hidden=true);
 action('projectTitle',async()=>{if(!editable())return;const name=prompt('Project name',S.project.name);if(!name||name===S.project.name)return;await api(apiPath(),'PUT',{name});S.project=await api(apiPath());$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Lab';});
-action('accountButton',()=>{
- modal('Your IDSL Lab account',`<p><strong>${esc(S.user.name)}</strong><br>${esc(S.user.email)}</p><button id="accountProjects" class="outline">My projects</button>${S.canInviteLab?'<hr><button id="inviteLabMembers" class="primary">Invite lab members</button><button id="approvedEmailsButton" class="outline">Approved emails</button>':''}${S.demo?'<p>This is a local preview account. Start without --demo to create accounts and invite lab members.</p>':'<hr><button id="signOut" class="outline">Sign out</button>'}${S.project?.role==='owner'?'<hr><p class="hint">Delete this entire project and its saved history.</p><button id="deleteProject" class="outline danger">Delete project</button>':''}`);
- action('accountProjects',projects);
+function accountDialog(){
+ modal('Your IDSL Lab account',`<p><strong>${esc(S.user.name)}</strong><br>${esc(S.user.email)}</p><button id="accountProjects" class="outline">My projects</button> <button id="accountAppearance" class="outline">Appearance</button>${S.canInviteLab?'<hr><button id="inviteLabMembers" class="primary">Invite lab members</button><button id="approvedEmailsButton" class="outline">Approved emails</button>':''}${S.demo?'<p>This is a local preview account. Start without --demo to create accounts and invite lab members.</p>':'<hr><button id="signOut" class="outline">Sign out</button>'}${S.project?.role==='owner'?'<hr><p class="hint">Delete this entire project and its saved history.</p><button id="deleteProject" class="outline danger">Delete project</button>':''}`);
+ action('accountProjects',projects);action('accountAppearance',appearanceDialog);
  if(S.canInviteLab){action('inviteLabMembers',()=>labSignupDialog());action('approvedEmailsButton',approvedEmailsDialog);}
  if(!S.demo)action('signOut',async()=>{if(!await save())return;await api('/api/logout','POST',{});for(const key of Object.keys(sessionStorage))if(key.startsWith('labtex-draft:'+S.user.id+':'))sessionStorage.removeItem(key);location.href='/';});
  if(S.project?.role==='owner')action('deleteProject',async()=>{if(prompt('Type the project name to permanently delete it:')!==S.project.name)return;await api(apiPath(),'DELETE',{});S.project=null;S.file=null;S.dirty=false;history.replaceState(null,'','/');location.reload();});
-});
+}
+action('accountButton',accountDialog);action('homeAccountButton',accountDialog);
 action('helpButton',()=>modal('A workspace that stays out of the way',`<p><strong>Ctrl / Cmd + S</strong> saves. <strong>Ctrl / Cmd + Enter</strong> compiles. Tab inserts two spaces in source mode.</p><p>Download your Overleaf project as a ZIP and import it from the project picker. Choose its main .tex or .typ document in the sidebar. Upload figures, bibliography files, classes, and styles with the upload button.</p><p>Visual mode supports plain paragraphs, simple bold/italic text, and headings. Equations, code, and advanced formatting stay in source blocks for both LaTeX and Typst. Editing is shared through autosave and periodic refresh, with conflict detection; this version does not merge simultaneous keystrokes.</p><p>Up to 30 saved versions per file are available, within a 40 MB history limit per project. Deleting a file removes its history. Browser drafts survive a refresh in the same tab.</p><p>This server allows 300 seconds per build, 8 MB per file, 40 MB of current files per project, and 25 owned projects per account. Shell escape is disabled.</p>`));
 $('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener('input',()=>setText($('code').value));$('code').addEventListener('scroll',syncScroll);$('code').addEventListener('click',updateStats);$('code').addEventListener('keyup',updateStats);$('code').addEventListener('keydown',e=>{if(e.key==='Tab'&&editable()){e.preventDefault();const area=e.target;area.setRangeText('  ',area.selectionStart,area.selectionEnd,'end');setText(area.value);}});document.querySelectorAll('[data-insert]').forEach(b=>{b.addEventListener('pointerdown',event=>{if(S.mode==='visual')event.preventDefault();});b.addEventListener('click',()=>insert(b.dataset.insert));});
 $('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();}catch(e){fail(e);}});
@@ -143,7 +200,7 @@ $('importZip').addEventListener('change',async e=>{try{const file=e.target.files
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save().catch(fail);}if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();compile().catch(fail);}});
 window.addEventListener('beforeunload',e=>{if(S.dirty||S.saving){keepDraft();e.preventDefault();e.returnValue='';}});
 const handle=$('splitHandle');handle.addEventListener('pointerdown',e=>{handle.setPointerCapture(e.pointerId);handle.dataset.drag='1';});handle.addEventListener('pointermove',e=>{if(!handle.dataset.drag)return;const r=$('workbench').getBoundingClientRect();const percent=Math.max(25,Math.min(75,(e.clientX-r.left)/r.width*100));$('workbench').style.gridTemplateColumns=`minmax(200px,${percent}fr) 6px minmax(200px,${100-percent}fr)`;});handle.addEventListener('pointerup',()=>delete handle.dataset.drag);handle.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const p=Math.max(25,Math.min(75,Number(handle.dataset.percent||50)+(e.key==='ArrowRight'?5:-5)));handle.dataset.percent=p;$('workbench').style.gridTemplateColumns=`minmax(200px,${p}fr) 6px minmax(200px,${100-p}fr)`;}});
-setInterval(async()=>{if(!S.project||!S.user||pollBusy||S.building||document.hidden)return;pollBusy=true;try{const p=await api(apiPath());$('connectionStatus').textContent='Connected';if(!S.dirty&&!S.saving&&!S.conflict){const f=p.files.find(f=>f.path===S.file?.path);if(!f){S.project=p;await loadFile(p.main,true);}else if(f.revision!==S.file.revision){S.project=p;await loadFile(f.path,true);toast('File updated by a coauthor.');}}S.project=p;$('projectTitle').textContent=p.name;renderFiles();updateBuild();}catch(e){$('connectionStatus').textContent=e.status===401?'Session expired':'Connection interrupted';if(e.status===401)markSaved('Sign in again to save','error');}finally{pollBusy=false;}},4000);
+setInterval(async()=>{if(!S.project||!S.user||pollBusy||S.building||document.hidden)return;pollBusy=true;try{const pid=S.project.id;const p=await api('/api/projects/'+pid);if(S.project?.id!==pid)return;$('connectionStatus').textContent='Connected';if(!S.dirty&&!S.saving&&!S.conflict){const f=p.files.find(f=>f.path===S.file?.path);if(!f){S.project=p;await loadFile(p.main,true);}else if(f.revision!==S.file.revision){S.project=p;await loadFile(f.path,true);toast('File updated by a coauthor.');}}if(S.project?.id!==pid)return;S.project=p;$('projectTitle').textContent=p.name;renderFiles();updateBuild();}catch(e){$('connectionStatus').textContent=e.status===401?'Session expired':'Connection interrupted';if(e.status===401)markSaved('Sign in again to save','error');}finally{pollBusy=false;}},4000);
 authenticate().catch(fail);
 
 function renderDiagnostics(log){
@@ -200,3 +257,30 @@ async function backupDialog(){
  }
  action('backupCurrent',()=>run(false));action('backupAll',()=>run(true));
 }
+
+// The project explorer is a page, with browser-history navigation to editors.
+action('createProject',newProject);action('emptyNewProject',newProject);action('importProject',()=>$('importZip').click());action('refreshProjects',refreshProjects);
+action('openSampleProject',async()=>{const sample=await api('/api/sample-project','POST',{recreate:true});if(!sample.id)throw Error('Your project limit is reached. Export and delete an unused project before adding the sample.');Home.sampleId=sample.id;await openProject(sample.id);});
+$('projectSearch').addEventListener('input',renderProjects);
+$('projectSort').addEventListener('change',()=>{Home.sort=$('projectSort').value;renderProjects();});
+for(const [id,view] of [['projectGridView','grid'],['projectListView','list']])action(id,()=>{Home.view=view;localStorage.setItem('labtex-project-view',view);renderProjects();});
+document.querySelectorAll('[data-project-filter]').forEach(button=>button.addEventListener('click',()=>{Home.filter=button.dataset.projectFilter;renderProjects();}));
+document.addEventListener('keydown',event=>{if(Home.visible&&!$('modal').open&&event.key==='/'&&!/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)){event.preventDefault();$('projectSearch').focus();}});
+
+function updateThemeControls(){
+ const theme=window.labtexTheme;
+ for(const id of ['themeButton','homeThemeButton','authThemeButton']){
+  $(id).title='Appearance · '+theme.preference+' ('+theme.resolved+')';
+  $(id).setAttribute('aria-label','Appearance · '+theme.resolved+' theme');
+  $(id).textContent=theme.resolved==='dark'?'☾':'☼';
+ }
+ if($('themeResolved'))$('themeResolved').textContent='Currently using the '+theme.resolved+' theme. Your PDF keeps its document colors.';
+}
+function appearanceDialog(){
+ modal('Appearance','<label>Theme<select id="themePreference" aria-label="Theme"><option value="system">System · follow your device</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p id="themeResolved" class="theme-note"></p><p>The preference is remembered in this browser and applies to your project home, editor, and sign-in screen.</p><div class="actions"><button id="closeAppearance" class="primary">Done</button></div>');
+ $('themePreference').value=window.labtexTheme.preference;
+ $('themePreference').addEventListener('change',()=>window.labtexTheme.set($('themePreference').value));
+ action('closeAppearance',closeModal);updateThemeControls();
+}
+for(const id of ['themeButton','homeThemeButton','authThemeButton'])action(id,appearanceDialog);
+window.addEventListener('labtex-themechange',updateThemeControls);updateThemeControls();

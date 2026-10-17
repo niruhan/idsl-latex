@@ -1,5 +1,7 @@
 # Hosting options
 
+This guide covers shared **Linux** hosting. Start with [Linux installation](INSTALL_LINUX.md) if the app is not installed yet. For a personal macOS workspace, use [the local guide](LOCAL.md); its runner supports local-only access. Project browsing, the Typst sample, and themes are available in both interfaces. Linux compiler isolation still needs `./labtex doctor` to pass on the target host.
+
 ## Private access over SSH
 
 Keep the app in local mode:

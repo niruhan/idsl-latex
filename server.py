@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from core import Problem, MAX_FILE, MAX_PROJECT, MAX_FILES, SAMPLE, safe_path, pack_zip, unpack_zip, compile_project, starter_files, main_document
+from core import Problem, MAX_FILE, MAX_PROJECT, MAX_FILES, SAMPLE, TYPST_SAMPLE, safe_path, pack_zip, unpack_zip, compile_project, starter_files, main_document
 from github_backup import destination, GitHub, backup_snapshot
 ROOT=Path(__file__).resolve().parent
 MAX_OWNED_PROJECTS=25
@@ -282,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             with app.db() as db: user=self.user(db)
             return app.backup(backup_match[1],user,data.get('token'))
         if method=='GET' and not path.startswith('/api/'):
-            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}
+            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/style.css':'style.css','/theme.css':'theme.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
             if path not in allowed: raise Problem('Not found.',404)
             f=ROOT/'web'/allowed[path]; self.send(f.read_bytes(),kind=mimetypes.guess_type(f)[0] or 'text/plain'); return
         with app.db() as db:
@@ -315,6 +315,19 @@ class Handler(BaseHTTPRequestHandler):
                     app.new_project(db,user['id'],'My first paper' if path=='/api/register-lab' else 'A space for your next idea',SAMPLE)
                 result,headers=self.login(db,user); db.commit(); self.send(result,headers=headers); return
             user=self.user(db)
+            if path=='/api/sample-project' and method=='POST':
+                db.execute('BEGIN IMMEDIATE')
+                key='typst_sample:'+user['id']
+                previous=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+                if previous:
+                    existing=db.execute('SELECT id FROM projects WHERE id=? AND owner=?',(previous['value'],user['id'])).fetchone()
+                    if existing: return {'id':existing['id']}
+                    if data.get('recreate') is not True: return {'id':None}
+                count=db.execute('SELECT COUNT(*) FROM projects WHERE owner=?',(user['id'],)).fetchone()[0]
+                if count>=MAX_OWNED_PROJECTS: return {'id':None,'limitReached':True}
+                pid=app.new_project(db,user['id'],'Getting started with Typst',TYPST_SAMPLE)
+                db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,pid))
+                return {'id':pid,'created':True}
             if path=='/api/backup-settings':
                 if method=='PUT':
                     value=destination(data)

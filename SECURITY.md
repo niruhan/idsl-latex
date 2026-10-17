@@ -4,7 +4,7 @@ This is an invite-only application intended for small, trusted groups. It is not
 
 ## Boundaries
 
-The supported launcher runs the backend inside a Bubblewrap filesystem with read-only application and runtime mounts, a writable database directory, and private temporary build storage. Other home directories, host configuration, SSH keys, and private deployment logs are not mounted. The backend retains host networking so it can serve the loopback listener. A compromised backend could still make outbound or local network connections and read the app database.
+The Linux launcher runs the backend inside a Bubblewrap filesystem with read-only application and runtime mounts, a writable database directory, and private temporary build storage. Other home directories, host configuration, SSH keys, and private deployment logs are not mounted. The backend retains host networking so it can serve the loopback listener. A compromised backend could still make outbound or local network connections and read the app database.
 
 Every compilation runs in an additional namespace with no host network, no host home directories, a cleared environment, a read-only TeX installation, and only that compilation's files writable. Tectonic runs in untrusted mode with shell escape disabled. The compiler has memory/output/time limits; the whole service has a 2 GiB memory limit, no swap allowance, one CPU quota, and a task limit.
 
@@ -16,6 +16,7 @@ These controls share the host kernel. They do not eliminate kernel, parser, runt
 - Passwords use salted PBKDF2-HMAC-SHA256 with 600,000 iterations. Session tokens and invitations are random and stored hashed. Sessions expire after seven days.
 - Cookies are HttpOnly, SameSite=Strict, and Secure for HTTPS origins. Requests validate Host and Origin; the frontend uses a restrictive content security policy.
 - Account invitations are single-use, expire after seven days, and require an exact approved address. Email ownership is **not** verified. Link possession authorizes signup; distribute links privately.
+- The project explorer only lists accessible projects. The sample endpoint creates a private project for the current account, enforces ownership and project limits, and preserves sample edits on later visits.
 - Project permissions are checked on each request. Account administration does not grant document access through the UI/API.
 - Request concurrency, body sizes, authentication attempts, uploads, build queues, history, and per-account project counts are bounded. These are availability mitigations, not a complete denial-of-service defense or global disk quota.
 
@@ -29,7 +30,7 @@ The Cloudflare client-IP header is trusted only in the bundled Quick Tunnel mode
 
 Never commit or upload `data/`, `.local/`, backups, `.env` files, logs, browser artifacts, or your whole installed folder. Source archives must come from Git's tracked files. Public tests use fictional `example.test` accounts and test-only password strings that do not grant access to any shipped or hosted account.
 
-Installers check pinned SHA-256 hashes for public dependencies before using them. This detects corrupt or changed downloads, but is not an independent guarantee of upstream integrity. Review upstream security releases and update `deploy/dependencies.json` deliberately. The package bundle is pinned for reproducibility and may not contain recent packages. Tectonic is MIT-licensed; cloudflared is Apache-2.0; the TeX bundle includes packages under multiple licenses.
+Installers check pinned SHA-256 hashes for public dependencies before using them. This detects corrupt or changed downloads, but is not an independent guarantee of upstream integrity. Review upstream security releases and update `deploy/dependencies.json` and `deploy/local-dependencies.json` deliberately. The package bundle is pinned for reproducibility and may not contain recent packages. Tectonic is MIT-licensed; cloudflared is Apache-2.0; the TeX bundle includes packages under multiple licenses.
 
 Only the latest published release is maintained. Back up before upgrading. If a real credential is accidentally published, revoke/rotate it immediately; deleting the current file alone does not remove it from Git history, clones, or caches.
 
@@ -38,3 +39,5 @@ Only the latest published release is maintained. Back up before upgrading. If a 
 The Mac local runner binds to loopback and runs compilers as the current user, using a dedicated compiler home, Tectonic untrusted mode, Typst project-root limits, and bounded builds. It does not provide Bubblewrap/cgroup isolation. Use it for trusted personal projects; keep shared/public hosting on Linux. See [local mode](docs/LOCAL.md).
 
 Only project owners may configure or trigger GitHub backups. Tokens are supplied per browser session in request bodies, used only for requests to the fixed GitHub API hostname, and never persisted. Backup configuration and commit identifiers are stored separately from source. Snapshots exclude the application database and local build output. GitHub permissions and repository visibility control access to backed-up source. Branches are updated without force; local data remains on errors.
+
+Appearance stores only `light`, `dark`, or `system` in browser localStorage. It does not store account details or GitHub credentials. Documentation screenshots use disposable fictional accounts and starter documents; generated invitation links and populated token fields must never appear in published images.
