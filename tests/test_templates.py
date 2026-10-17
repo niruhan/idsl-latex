@@ -63,7 +63,10 @@ class TemplateTests(unittest.TestCase):
         _, files = template_files('neurips-2026')
         result = compile_project(files, main_document(files))
         self.assertTrue(result['success'], result['log'])
-        self.assertNotIn('undefined citations', result['log'].lower())
+        # latexmk retains warnings from its initial pass, before BibTeX resolves
+        # citations. Check the final PDFLaTeX pass rather than the combined log.
+        final_log = result['log'].lower().rsplit("latexmk: applying rule 'pdflatex'", 1)[-1]
+        self.assertNotIn('undefined citations', final_log)
 
     def test_western_starter_compiles_without_external_packages(self):
         import os
