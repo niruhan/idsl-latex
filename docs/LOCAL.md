@@ -54,6 +54,8 @@ Open **My projects → New project** and choose **Typst** or **LaTeX**, then a r
 
 Both formats use the same file tree, autosave, history, source ZIP export, PDF preview, and PDF download. Typst projects enable auto-compile by default; the choice is remembered per project in that browser. Edits made during a build queue another build. Compiler errors with `file:line:column` locations are clickable in the build log.
 
+Click a folder name or its arrow under **Project files** to collapse or expand it, including nested folders. Your choices are remembered per project in this browser. Root files such as `main.typ` stay at the top. File search reveals matches inside collapsed folders; clearing the search restores your folder layout. Opening a file from search or a compiler diagnostic reveals its parent folders.
+
 Visual mode edits simple top-level paragraphs, headings, bold/italic text, and Typst lists. Equations, citations, imports, functions, templates, and advanced formatting remain in source cards. Switching modes preserves untouched source. The formatting toolbar inserts the right syntax for the current language; bold and italic also work on selected visual text. Use Source mode for full control. This is structured block editing with a compiled PDF, not arbitrary PDF editing or complete WYSIWYG layout editing.
 
 Typst projects may use local imports, figures, bibliography files, fonts available on your Mac, and packages from Typst Universe. Compilation starts a fresh CLI process per build; it does not yet use Typst's persistent incremental compiler or source-to-PDF position mapping.
@@ -79,7 +81,7 @@ To restore source, download the repository ZIP from GitHub. For the shared layou
 
 ## Browser validation
 
-Install Playwright outside this repository and use Node 20 or newer. `tests/run_browser.py` starts a disposable database and runs the project-home, theme, LaTeX, and Typst browser regressions; it never touches `data/` or writes to GitHub.
+Install Playwright outside this repository and use Node 20 or newer. `tests/run_browser.py` starts a disposable database and runs the project-home, file-tree, theme, LaTeX, and Typst browser regressions; it never touches `data/` or writes to GitHub.
 
 ```sh
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \

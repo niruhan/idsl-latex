@@ -29,7 +29,7 @@ Shared hosting requires x86_64 Linux, Python 3.10+, systemd, cgroup v2, and Bubb
 ## Features
 
 - **Project explorer:** cards or list, search, sorting, and filters for format and ownership. Click a project to edit; **My projects** saves and returns home.
-- **LaTeX + Typst:** source and basic visual editing, multi-file projects, figures, and bibliographies.
+- **LaTeX + Typst:** source and basic visual editing, multi-file projects with collapsible folders, figures, and bibliographies.
 - **PDF preview:** manual or automatic compilation, clickable error locations, and PDF download.
 - **Sharing:** invite coauthors to individual projects with editor or view-only access.
 - **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.

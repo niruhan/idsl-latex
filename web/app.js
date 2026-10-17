@@ -2,6 +2,7 @@ import {escapeHTML as esc,renderVisual,renderTypstVisual} from './visual.js';
 const $=id=>document.getElementById(id);
 const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,githubToken:'',backupAuto:false};
 const Home={visible:false,projects:[],sampleId:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
+const FileTree={projects:new Map(),searchKey:null,searchCollapsed:new Set()};
 let saveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false,navigationId=0;const backupTimers=new Map();
 const isTypst=()=>S.file?.path.endsWith('.typ');
 const isDocument=()=>/\.(tex|typ)$/.test(S.file?.path||'');
@@ -47,15 +48,51 @@ async function save(){
 async function showConflict(){const latest=await api(apiPath('file')+'?path='+encodeURIComponent(S.file.path));modal('Two versions, both safe',`<p>A coauthor changed this file. Your draft has not overwritten their work. Download your draft, then load the latest version and merge your changes.</p><div class="conflict-grid"><label>Your draft<textarea id="localConflict" readonly></textarea></label><label>Server version<textarea id="serverConflict" readonly></textarea></label></div><div class="actions"><button id="downloadDraft" class="outline">Download my draft</button><button id="useServer" class="primary">Load server version</button></div>`);$('localConflict').value=S.text;$('serverConflict').value=latest.content??'[Binary file]';action('downloadDraft',()=>download(S.text,'my-draft.'+(isTypst()?'typ':'tex'),'text/plain'));action('useServer',()=>{download(S.text,'my-draft.'+(isTypst()?'typ':'tex'),'text/plain');sessionStorage.removeItem(draftKey());S.conflict=false;S.dirty=false;closeModal();loadFile(S.file.path,true);});}
 function download(data,name,type){const url=URL.createObjectURL(new Blob([data],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}
 function base64File(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=reject;reader.readAsDataURL(file);});}
-function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toLowerCase();const tree=$('fileTree');tree.replaceChildren();const dirs=new Set();S.project.files.filter(f=>f.path.toLowerCase().includes(term)).forEach(f=>{
- const parts=f.path.split('/');const folder=parts.slice(0,-1).join('/');if(folder&&!dirs.has(folder)){dirs.add(folder);const div=document.createElement('div');div.className='tree-folder';div.textContent='▾  '+folder;tree.append(div);}
- const b=document.createElement('button');b.className='tree-file'+(S.file?.path===f.path?' active':'');b.title=f.path;const ext=f.path.split('.').pop();b.innerHTML=`<span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(parts.at(-1))}</span>${f.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',()=>loadFile(f.path).catch(fail));tree.append(b);
- });$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';$('mainFile').innerHTML=S.project.files.filter(f=>/\.(tex|typ)$/.test(f.path)).map(f=>`<option value="${esc(f.path)}">${esc(f.path)}</option>`).join('');$('mainFile').value=S.project.main;
+function folderState(){
+ const key=`labtex-folders:${S.user.id}:${S.project.id}`;
+ if(!FileTree.projects.has(key)){
+  let paths=[];try{const saved=JSON.parse(localStorage.getItem(key));if(Array.isArray(saved))paths=saved.filter(path=>typeof path==='string');}catch{}
+  FileTree.projects.set(key,new Set(paths));
+ }
+ return {key,collapsed:FileTree.projects.get(key)};
+}
+function rememberFolders({key,collapsed}){try{localStorage.setItem(key,JSON.stringify([...collapsed]));}catch{}}
+function revealFile(path){
+ const state=folderState(),parts=path.split('/');let changed=false;
+ for(let depth=1;depth<parts.length;depth++)changed=state.collapsed.delete(parts.slice(0,depth).join('/'))||changed;
+ if(changed)rememberFolders(state);
+}
+function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toLowerCase();const tree=$('fileTree'),state=folderState();const root={folders:new Map(),files:[]};
+ const searchKey=state.key+':'+term;if(FileTree.searchKey!==searchKey){FileTree.searchKey=searchKey;FileTree.searchCollapsed.clear();}
+ const collapsed=term?FileTree.searchCollapsed:state.collapsed;
+ for(const file of S.project.files.filter(file=>file.path.toLowerCase().includes(term))){
+  const parts=file.path.split('/');let node=root;
+  for(let depth=0;depth<parts.length-1;depth++){
+   const name=parts[depth];if(!node.folders.has(name))node.folders.set(name,{path:parts.slice(0,depth+1).join('/'),folders:new Map(),files:[]});node=node.folders.get(name);
+  }
+  node.files.push(file);
+ }
+ let folderId=0;
+ function renderNode(node,parent){
+  for(const file of node.files){
+   const b=document.createElement('button');b.className='tree-file'+(S.file?.path===file.path?' active':'');b.title=file.path;const ext=file.path.split('.').pop();b.innerHTML=`<span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(file.path.split('/').at(-1))}</span>${file.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',()=>loadFile(file.path).catch(fail));parent.append(b);
+  }
+  for(const [name,folder] of node.folders){
+   const row=document.createElement('button'),arrow=document.createElement('span'),label=document.createElement('span'),children=document.createElement('div');
+   row.type='button';row.className='tree-folder';row.dataset.folder=folder.path;row.title=folder.path;arrow.setAttribute('aria-hidden','true');label.textContent=name;label.className='filename';row.append(arrow,label);
+   children.className='tree-children';children.id='file-folder-'+folderId++;row.setAttribute('aria-controls',children.id);
+   function expanded(value){children.hidden=!value;row.setAttribute('aria-expanded',String(value));row.setAttribute('aria-label',(value?'Collapse ':'Expand ')+folder.path);arrow.textContent=value?'▾':'▸';}
+   expanded(!collapsed.has(folder.path));row.addEventListener('click',()=>{const value=children.hidden;if(value)collapsed.delete(folder.path);else collapsed.add(folder.path);if(!term)rememberFolders(state);expanded(value);});
+   parent.append(row,children);renderNode(folder,children);
+  }
+ }
+ tree.replaceChildren();renderNode(root,tree);
+ $('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';$('mainFile').innerHTML=S.project.files.filter(f=>/\.(tex|typ)$/.test(f.path)).map(f=>`<option value="${esc(f.path)}">${esc(f.path)}</option>`).join('');$('mainFile').value=S.project.main;
 }
 async function loadFile(path,force=false){if(!force&&(!await save()))return;const pid=S.project.id;const f=await api(apiPath('file')+'?path='+encodeURIComponent(path));if(S.project?.id!==pid)return;S.file=f;S.text=f.content??'';S.saved=S.text;S.dirty=false;S.conflict=false;$('filePath').textContent=path;$('fileType').textContent=path.endsWith('.typ')?'Typst':path.endsWith('.tex')?'LaTeX':path.split('.').pop().toUpperCase();$('code').setAttribute('aria-label',isTypst()?'Typst source':'LaTeX source');$('visualTab').disabled=!isDocument();if(!isDocument())S.mode='source';document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable()||!isDocument());$('binaryPreview').hidden=f.content!==null;$('code').readOnly=!editable();markSaved('All changes saved');
  if(f.content===null){const ext=path.split('.').pop().toLowerCase();const mimes={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',pdf:'application/pdf'};$('binaryPreview').replaceChildren();if(mimes[ext]){const el=document.createElement(ext==='pdf'?'iframe':'img');el.src='data:'+mimes[ext]+';base64,'+f.base64;el.alt=path;el.title=path;$('binaryPreview').append(el);}else $('binaryPreview').textContent='Binary asset · Included when compiling and exporting the project.';
  }else{let draft;try{draft=JSON.parse(sessionStorage.getItem(draftKey()));}catch{}if(draft&&draft.content!==f.content){S.text=draft.content;S.dirty=true;markSaved('Recovered browser draft','dirty');if(draft.revision!==f.revision){S.conflict=true;await showConflict();}else{toast('Recovered your unsaved draft.');saveTimer=setTimeout(()=>save().catch(fail),1000);}}}
- editorMode(S.mode);renderFiles();updateStats();
+ revealFile(path);editorMode(S.mode);renderFiles();updateStats();
 }
 async function openProject(pid,{historyMode='push'}={}){if(S.project&&!await save())return;const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Lab';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile','saveButton'])$(id).disabled=!editable();document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable());$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await loadFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path,true);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||(localStorage.getItem('labtex-auto:'+pid)===null&&S.project.main.endsWith('.typ'));$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();if($('autoCompile').checked&&!S.project.build)scheduleCompile();if(!S.invite)setProjectRoute('#project='+pid,historyMode);}
 // A fresh browsing context keeps PDF loads out of page Back/Forward history.

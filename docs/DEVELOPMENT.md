@@ -18,7 +18,7 @@ CI runs the backend/installer tests with a distribution TeX Live installation. N
 
 ## Browser regression test
 
-On Mac, after compiler setup, run all four browser suites against a temporary database:
+On Mac, after compiler setup, run all five browser suites against a temporary database:
 
 ```sh
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
@@ -27,6 +27,8 @@ python3 tests/run_browser.py
 ```
 
 This covers LaTeX/Typst editing and real builds, the project explorer and navigation, and appearance preferences (one-click Light/Dark switching, System in account settings, reload persistence, device changes, tab synchronization, and mobile controls). It leaves `data/` untouched. Install Playwright separately and use Node 20+; set `CHROME_BIN` when using an existing Chromium browser.
+
+File-tree checks cover nested folder controls, keyboard operation, persistence across refreshes and projects, and search results inside collapsed folders.
 
 For the Linux deployment's browser checks:
 
