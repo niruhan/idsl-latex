@@ -20,15 +20,11 @@ html[data-theme=dark] #projectHome{background:#142219}
 html[data-theme=dark] .home-sidebar,html[data-theme=dark] .sidebar{background:#17291e}
 html[data-theme=dark] .home-nav.active,html[data-theme=dark] .tree-file.active{background:#2a4431;color:#c1e5c8}
 html[data-theme=dark] .home-folder-link:hover,html[data-theme=dark] .home-folder-link.active{background:#2a4431;color:#c1e5c8}
-html[data-theme=dark] .project-directory{background:#1c2f21;border-color:#3a4e36}html[data-theme=dark] .directory-cover{background:#2b4028}html[data-theme=dark] .directory-cover svg{color:#9bb98f}html[data-theme=dark] .project-move{background:#2b4028;color:#bad8b6}html[data-theme=dark] .folder-drop-target{background:#304f35!important}
+html[data-theme=dark] .project-directory{background:#1c2f21;border-color:#3a4e36}html[data-theme=dark] .directory-cover{background:#2b4028}html[data-theme=dark] .directory-cover svg{color:#9bb98f}html[data-theme=dark] .project-menu-button{background:#2b4028;color:#bad8b6}html[data-theme=dark] .folder-drop-target{background:#304f35!important}
 html[data-theme=dark] .home-nav.active>span{color:#b6d9b8}
 html[data-theme=dark] .home-nav small{background:#3b5d41;color:#d0e7cc}
 html[data-theme=dark] .home-nav>span,html[data-theme=dark] .file-icon,html[data-theme=dark] .project-open{color:#9bb98f}
 html[data-theme=dark] .home-heading h1,html[data-theme=dark] .home-sample h2,html[data-theme=dark] .project-details h2,html[data-theme=dark] .projects-empty h2{color:#d4e6ce}
-html[data-theme=dark] .home-sample{background:#213923;border-color:#3d5535}
-html[data-theme=dark] .sample-symbol{background:#e4ecd9;box-shadow:5px 5px 0 #3c5731}
-html[data-theme=dark] .home-sample .outline{background:#294330;border-color:#536d46;color:#d6e5ce}
-html[data-theme=dark] .home-sample .outline:hover{background:#38583b}
 html[data-theme=dark] .project-search,html[data-theme=dark] .project-sort select,html[data-theme=dark] .view-switch{background:#1a2c20;border-color:#3b513c;color:#d5e3d4}
 html[data-theme=dark] .project-search input{color:#d5e3d4}
 html[data-theme=dark] .view-switch button.active{background:#3c5b3a;color:#d3e7c9}
@@ -38,7 +34,6 @@ html[data-theme=dark] .project-cover{background:#2b4028;border-color:#3a4e36}
 html[data-theme=dark] .project-cover.latex{background:#3a3826}
 html[data-theme=dark] .project-format{background:#243a22;border-color:#576e45;color:#c0d7a7}
 html[data-theme=dark] .latex .project-format{background:#3d3a27;border-color:#706340;color:#ddcda2}
-html[data-theme=dark] .project-sample-badge{color:#c1d7ab}
 html[data-theme=dark] .project-owner{border-color:#354a32}
 html[data-theme=dark] .project-owner .owner-dot{background:#385032;color:#cee0bd}
 html[data-theme=dark] .projects-empty{background:#1a2c1e;border-color:#4c6743}

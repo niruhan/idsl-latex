@@ -203,7 +203,7 @@ def unit_text():
     root = str(ROOT).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%')
     working_directory = str(ROOT).replace('%', '%%')
     return f'''[Unit]
-Description=IDSL Lab LaTeX
+Description=IDSL Editor
 After=network-online.target
 Wants=network-online.target
 
@@ -287,7 +287,7 @@ def start(args):
                 response = connection.getresponse()
                 response.read()
                 if response.status == 200:
-                    print('IDSL Lab LaTeX: ' + origin)
+                    print('IDSL Editor: ' + origin)
                     print('First account: ./labtex setup-token | Service details: ./labtex status')
                     print('For service after logout/reboot, see enable-linger in the README.')
                     return
@@ -301,7 +301,7 @@ def start(args):
 
 def main():
     os.umask(0o077)
-    parser = argparse.ArgumentParser(description='Install and host IDSL Lab LaTeX safely on Linux.')
+    parser = argparse.ArgumentParser(description='Install and host IDSL Editor safely on Linux.')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('setup', help='Download verified compiler and offline bundle; check isolation')
     commands.add_parser('doctor', help='Check prerequisites, isolation, and real PDF compilation')

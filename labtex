@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IDSL Lab LaTeX: installation and service management, using only the stdlib."""
+"""IDSL Editor: installation and service management, using only the stdlib."""
 import sys
 
 if __name__ == '__main__':

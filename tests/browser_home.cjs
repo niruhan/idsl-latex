@@ -14,12 +14,16 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await page.locator('input[name=email]').fill('browser-owner@example.test');await page.locator('input[name=password]').fill('browser-test-password-only');await page.locator('#authSubmit').click();
   await page.locator('#projectHome').waitFor({state:'visible'});await page.locator('.project-entry').first().waitFor();
   assert.equal(await page.locator('#workspace').isHidden(),true);
-  const projects=(await(await context.request.get(origin+'/api/projects')).json()).projects;
+  let projects=(await(await context.request.get(origin+'/api/projects')).json()).projects;
   assert.equal(await page.locator('.project-entry').count(),projects.length);
-  const sample=projects.find(p=>p.name==='Getting started with Typst');assert.ok(sample);
   await page.reload();await page.locator('.project-entry').first().waitFor();
   assert.equal((await(await context.request.get(origin+'/api/projects')).json()).projects.length,projects.length);
-  console.log('PASS sign-in lands on the explorer and repeated visits keep one Typst sample');
+  assert.equal(await page.locator('.home-sample').count(),0);
+  await page.locator('#browseTemplates').click();await page.locator('[data-starter=getting-started-typst]').click();await page.locator('#workspace').waitFor({state:'visible'});
+  const sample={id:new URLSearchParams(new URL(page.url()).hash.slice(1)).get('project')};
+  await page.locator('#projectsNavButton').click();await page.locator('.project-entry[data-project="'+sample.id+'"]').waitFor();
+  projects=(await(await context.request.get(origin+'/api/projects')).json()).projects;
+  console.log('PASS sign-in and repeated home visits create nothing; the Typst sample is a regular template');
 
   await page.locator('[data-project-filter=typst]').click();
   assert.equal(await page.locator('.project-entry').count(),projects.filter(p=>p.main.endsWith('.typ')).length);
@@ -51,7 +55,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const direct=await context.newPage();await direct.goto(origin+'/#project='+sample.id);await direct.locator('#workspace').waitFor({state:'visible'});assert.equal(await direct.locator('#filePath').textContent(),'main.typ');await direct.close();
   console.log('PASS sample opens and compiles, pending edits save on exit, browser Back/Forward and editor deep links');
 
-  await page.locator('#openSampleProject').click();await page.locator('#workspace').waitFor({state:'visible'});
+  await page.locator('.project-entry[data-project="'+sample.id+'"]').click();await page.locator('#workspace').waitFor({state:'visible'});
   // Hold a real compile response until after leaving the editor.
   let releaseResponse;const responseHeld=new Promise(resolve=>{releaseResponse=resolve;});let notifyStarted;const started=new Promise(resolve=>{notifyStarted=resolve;});
   await page.route('**/api/projects/*/compile',async route=>{const result=await route.fetch();notifyStarted();await responseHeld;await route.fulfill({response:result});});
@@ -65,8 +69,8 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   fs.writeFileSync(path.join(output,'project-home-mobile-layout.json'),JSON.stringify(await page.evaluate(()=>({viewport:innerHeight,height:document.documentElement.scrollHeight,homes:document.querySelectorAll('#projectHome').length,header:document.querySelector('.home-topbar').getBoundingClientRect().toJSON()})),null,2));
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile explorer must fit the viewport');
   await page.screenshot({animations:'disabled',path:path.join(output,'project-home-mobile.png'),fullPage:true});
-  await page.locator('#openSampleProject').click();await page.locator('#workspace').waitFor({state:'visible'});
+  await page.locator('.project-entry[data-project="'+sample.id+'"]').click();await page.locator('#workspace').waitFor({state:'visible'});
   assert.deepEqual(errors,[]);
-  console.log('PASS leaving during compilation, mobile layout, sample shortcut and no browser errors');
+  console.log('PASS leaving during compilation, mobile layout, project navigation and no browser errors');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});

@@ -40,13 +40,15 @@ After signing in, you land on the project explorer. Browse cards or switch to a 
 
 Click a project to enter its editor. **My projects** returns to the explorer after saving your edits. Browser Back/Forward and direct project links also work; reloading an editor keeps that project open.
 
-The first home visit creates a private **Getting started with Typst** sample for your account, with an included section, an equation, and bibliography. Click its card or **Open sample** to edit and compile it. Returning home preserves your sample edits and does not create duplicates. Deleting it keeps it deleted until you explicitly choose **Open sample** again. The sample counts toward your 25-project limit and is only added when space is available.
+Open **⋯** on a project card or list row to **Rename**, **Move to folder**, or **Delete** it. Owners and editors can rename; only owners can delete. Deletion requires typing the project name and removes the project and its history for all collaborators. Existing GitHub backups are retained. Viewers can move projects within their own explorer.
+
+The **Getting started with Typst** sample is a regular choice under **More templates**. It contains an included section, an equation, and bibliography. Home visits never add projects automatically; existing sample projects and their edits are preserved.
 
 ### Organize projects into folders
 
 Click **New folder** to create a directory in the explorer. Open it to create subfolders, then use the sidebar or breadcrumbs to navigate. Each account can have up to 100 folders, nested up to 10 levels.
 
-Use the arrow button on a project card or list row to choose its destination, or drag the project onto a folder card, sidebar folder, or breadcrumb. Choose **All projects (root)** to move it out. New projects and ZIP imports start in the folder you currently have open. **Folder settings** lets you rename a folder, change its parent, or delete it once empty.
+Use **⋯ → Move to folder** on a project card or list row to choose its destination, or drag the project onto a folder card, sidebar folder, or breadcrumb. Choose **All projects (root)** to move it out. New projects and ZIP imports start in the folder you currently have open. **Folder settings** lets you rename a folder, change its parent, or delete it once empty.
 
 The root shows folders and projects that have not been filed. Search at the root finds projects in every folder; inside a folder it includes that folder's descendants. **My projects**, **Shared with me**, **Typst**, and **LaTeX** filters search across your whole collection.
 
@@ -54,20 +56,24 @@ Folders belong to your account. Moving a shared project changes only your own ex
 
 ## Starter templates
 
-The **Start with a template** gallery is available on every account's project home. Click **Use template** to create your own private, editable copy in the current folder. The templates are also choices under **New project → Start with**, after selecting Typst or LaTeX. Each copy counts toward the 25-project limit; browsing the gallery creates nothing and does not overwrite earlier copies.
+Western presentation and NeurIPS remain featured under **Start with a template**. **More templates** opens a separate searchable library for other starters. The gallery is available on every account's project home. Click **Use template** to create your own private, editable copy in the current folder. The templates are also choices under **New project → Start with**, after selecting Typst or LaTeX. Each copy counts toward the 25-project limit; browsing the gallery creates nothing and does not overwrite earlier copies.
 
 - **Western presentation (Typst):** the supplied Western university slide design, with purple colors, logo, section headers, 16:9 slides, Libertinus Serif, and note/discussion helper boxes. Author and department are placeholders. Edit `main.typ`, `shared.typ`, and `sections/`. Touying 0.5.3 is bundled with its license; the slides require no external Typst packages.
 - **NeurIPS 2026 paper (LaTeX):** the [official 2026 style](https://neurips.cc/Conferences/2026/CallForPapers) and checklist, with an anonymous Main Track manuscript, bibliography, and appendix. Fill in your own content and checklist answers. The project's README explains preprint/final options and links to the conference guidance.
+
+The library also includes **Getting started with Typst**, **Classic research article (LaTeX)**, **Western thesis scaffold (Typst)**, **Coursework assignment (Typst)**, **Beamer presentation (LaTeX)**, and **Academic CV (Typst)**. The thesis scaffold uses placeholder content and must be checked against current SGPS and program requirements before submission.
 
 The templates contain public starter content, with no personal documents or account details. Creating a copy does not share it with anyone. Original upstream licenses and attribution are included; Western's logo remains its trademark. Interface themes do not change a template's document colors.
 
 Preview the [Western presentation](images/western-presentation.png) and [NeurIPS paper](images/neurips-paper.png).
 
+The account avatar opens a dropdown with **My projects**, **Themes & appearance**, and **Sign out**, plus administrator tools when available.
+
 ## Appearance
 
-Click **Themes** beside your avatar to choose **IDSL Forest** (the original), **Western Purple**, **Catppuccin**, **Dracula**, or **Solarized**. Each includes light and dark appearances. Catppuccin uses Latte/Mocha colors; Dracula's light appearance is an app adaptation. Western Purple uses [Western's purple and orchid palette](https://brand.westernu.ca/visual-identity/colours.html).
+Open the account avatar and choose **Themes & appearance** to choose **IDSL Forest** (the original), **Western Purple**, **Nord**, **GitHub**, or **Solarized**. Each includes light and dark appearances. Western Purple has a white canvas in light mode, neutral surfaces, and [Western's purple and orchid accents](https://brand.westernu.ca/visual-identity/colours.html). Nord uses cool slate and arctic blue; GitHub uses neutral surfaces and blue accents. Saved Catppuccin/Dracula choices migrate to Nord/GitHub respectively.
 
-The sun/moon button still switches light/dark with one click. In **Themes** or **Account → Appearance**, choose **System** to follow your device. The palette and mode are remembered in this browser, apply before sign-in, and synchronize between its open tabs. Preferences affect the interface; PDFs retain the colors defined by their document source.
+The sun/moon button still switches light/dark with one click. In **Account → Themes & appearance**, choose **System** to follow your device. The palette and mode are remembered in this browser, apply before sign-in, and synchronize between its open tabs. Preferences affect the interface; Exported PDFs retain the colors defined by their document source.
 
 [See the theme picker](images/themes.png).
 
@@ -77,9 +83,15 @@ The sun/moon button still switches light/dark with one click. In **Themes** or *
 
 Open **My projects → New project** and choose **Typst** or **LaTeX**, then a research starter or a blank document. Imported ZIPs detect `main.typ` or `main.tex`; choose a different entry point under **Main document** when necessary. A project can contain both formats, and changing the main document selects its compiler.
 
-Both formats use the same file tree, autosave, history, source ZIP export, PDF preview, and PDF download. Typst projects enable auto-compile by default; the choice is remembered per project in that browser. Edits made during a build queue another build. Compiler errors with `file:line:column` locations are clickable in the build log.
+Click **Dark PDF** in the preview pane to display the rendered document in dark colors. This choice is remembered separately from the interface theme and works with any palette in light or dark mode. It changes the on-screen preview only; exported PDFs and document source keep their original colors.
+
+Both formats use the same file tree, autosave, history, source ZIP export, PDF preview, and PDF download, named after the project. Typst projects enable auto-compile by default; the choice is remembered per project in that browser. Edits made during a build queue another build. Compiler errors with `file:line:column` locations are clickable in the build log.
+
+Right-click a file in **Project files** for **Download**, **Rename**, **Replace**, or **Delete**. The **•••** file-actions button and **Shift+F10** offer the same menu. Replacement keeps its project path and saves the old version in history; renaming does not update document references. Viewers can only download. Choose another main document before deleting the current one.
 
 Click a folder name or its arrow under **Project files** to collapse or expand it, including nested folders. Your choices are remembered per project in this browser. Root files such as `main.typ` stay at the top. File search reveals matches inside collapsed folders; clearing the search restores your folder layout. Opening a file from search or a compiler diagnostic reveals its parent folders.
+
+Click an image in **Project files** to preview it in the left pane. SVGs and common raster images open in **Preview**; SVGs also offer **Source** for editing. Selecting a document returns to your previous Source/Visual mode.
 
 Visual mode edits simple top-level paragraphs, headings, bold/italic text, and Typst lists. Equations, citations, imports, functions, templates, and advanced formatting remain in source cards. Switching modes preserves untouched source. The formatting toolbar inserts the right syntax for the current language; bold and italic also work on selected visual text. Use Source mode for full control. This is structured block editing with a compiled PDF, not arbitrary PDF editing or complete WYSIWYG layout editing.
 

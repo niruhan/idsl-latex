@@ -19,24 +19,32 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
  });}
  try{
   await page.goto(origin);assert.equal((await context.request.get(origin+'/palettes.css')).status(),200);await page.locator('#authPaletteButton').click();assert.equal(await page.locator('[data-palette-choice]').count(),5);
+  assert.deepEqual(await page.locator('[data-palette-choice]').evaluateAll(buttons=>buttons.map(button=>button.dataset.paletteChoice)),['forest','western','nord','github','solarized']);
   await page.locator('[data-palette-choice=western]').click();await waitPalette('western');await page.locator('#closeAppearance').click();
   await page.reload();await waitPalette('western');
+  for(const [oldPalette,replacement] of [['catppuccin','nord'],['dracula','github']]){
+   await page.evaluate(value=>localStorage.setItem('labtex-palette',value),oldPalette);await page.reload();await waitPalette(replacement);
+   assert.equal(await page.evaluate(()=>localStorage.getItem('labtex-palette')),replacement);
+  }
+  await page.locator('#authPaletteButton').click();await page.locator('[data-palette-choice=western]').click();await page.locator('#closeAppearance').click();
   await page.locator('input[name=email]').fill('browser-owner@example.test');await page.locator('input[name=password]').fill('browser-test-password-only');await page.locator('#authSubmit').click();await page.locator('.project-entry').first().waitFor();
   assert.equal(await page.locator('[data-starter]').count(),2);
   const colors=new Set();
-  for(const palette of ['forest','western','catppuccin','dracula','solarized']){
-   await page.locator('#homePaletteButton').click();await page.locator('[data-palette-choice='+palette+']').click();await waitPalette(palette);
+  for(const palette of ['forest','western','nord','github','solarized']){
+   await page.locator('#homeAccountButton').click();await page.locator('#accountAppearance').click();await page.locator('[data-palette-choice='+palette+']').click();await waitPalette(palette);
    assert.equal(await page.locator('[data-palette-choice='+palette+']').getAttribute('aria-pressed'),'true');
    for(const mode of ['light','dark']){
     await page.locator('#themePreference').selectOption(mode);await page.waitForFunction(mode=>document.documentElement.dataset.theme===mode,mode);
     for(const selector of ['#closeAppearance','.project-entry'])assert.ok(await contrast(selector)>=4.5,`${palette} ${mode} ${selector} must have readable text`);
+    if(palette==='western'&&mode==='light')assert.equal(await page.locator('#projectHome').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)','Western explorer must use a white background');
    }
    colors.add(await page.locator('.home-topbar').evaluate(el=>getComputedStyle(el).backgroundColor));await page.locator('#closeAppearance').click();
+   if(['nord','github'].includes(palette))await snapshot('palette-'+palette);
   }
   assert.equal(colors.size,5,'Every palette has a distinct interface color');
-  await page.locator('#homePaletteButton').click();await page.locator('[data-palette-choice=western]').click();await page.locator('#themePreference').selectOption('light');await page.locator('#closeAppearance').click();
+  await page.locator('#homeAccountButton').click();await page.locator('#accountAppearance').click();await page.locator('[data-palette-choice=western]').click();await page.locator('#themePreference').selectOption('light');await page.locator('#closeAppearance').click();
   const other=await context.newPage();await other.goto(origin);await other.locator('.project-entry').first().waitFor();await other.waitForFunction(()=>document.documentElement.dataset.palette==='western');
-  await page.locator('#homePaletteButton').click();await page.locator('[data-palette-choice=solarized]').click();await other.waitForFunction(()=>document.documentElement.dataset.palette==='solarized');await page.locator('[data-palette-choice=western]').click();await page.locator('#closeAppearance').click();await other.close();
+  await page.locator('#homeAccountButton').click();await page.locator('#accountAppearance').click();await page.locator('[data-palette-choice=solarized]').click();await other.waitForFunction(()=>document.documentElement.dataset.palette==='solarized');await page.locator('[data-palette-choice=western]').click();await page.locator('#closeAppearance').click();await other.close();
   await page.reload();await page.locator('.project-entry').first().waitFor();await waitPalette('western');await snapshot('western-theme-projects');
   console.log('PASS five light/dark palettes, contrast, direct selection, reload persistence and cross-tab synchronization');
 
@@ -46,18 +54,18 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const western=new URLSearchParams(new URL(page.url()).hash.slice(1)).get('project');assert.equal((await get('/api/projects')).projects.find(p=>p.id===western).folder,folder);
   const source=await page.locator('#code').inputValue(),pdf=await page.locator('#pdfFrame').getAttribute('src');assert.match(source,/Your name/);assert.doesNotMatch(source,/Niruhan/);
   await page.locator('#autoCompile').uncheck();await snapshot('western-presentation-starter');
-  await page.locator('#paletteButton').click();await page.locator('[data-palette-choice=catppuccin]').click();await page.locator('#closeAppearance').click();await page.locator('#themeButton').click();
+  await page.locator('#accountButton').click();await page.locator('#accountAppearance').click();await page.locator('[data-palette-choice=nord]').click();await page.locator('#closeAppearance').click();await page.locator('#themeButton').click();
   assert.equal(await page.locator('#code').inputValue(),source);assert.equal(await page.locator('#pdfFrame').getAttribute('src'),pdf,'Palette changes must not reload or recolor document PDFs');
   await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'The mobile editor fits with both appearance controls');
-  await page.locator('#paletteButton').click();assert.equal(await page.locator('[data-palette-choice=catppuccin]').getAttribute('aria-pressed'),'true');await page.locator('#closeAppearance').click();
+  await page.locator('#accountButton').click();await page.locator('#accountAppearance').click();assert.equal(await page.locator('[data-palette-choice=nord]').getAttribute('aria-pressed'),'true');await page.locator('#closeAppearance').click();
   await page.locator('#projectsNavButton').click();await page.locator('[data-starter=neurips-2026]').waitFor();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'The mobile gallery fits');await snapshot('template-gallery-mobile');
   await page.setViewportSize({width:1440,height:1000});await page.locator('[data-starter=neurips-2026]').click();await page.locator('#workspace').waitFor({state:'visible'});assert.equal(await page.locator('#filePath').textContent(),'main.tex');
   const compiled=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST',{timeout:330000});await page.locator('#compileButton').click();const result=await(await compiled).json();assert.equal(result.success,true,result.log);
-  await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));await page.locator('#paletteButton').click();await page.locator('[data-palette-choice=western]').click();await page.locator('#themePreference').selectOption('light');await page.locator('#closeAppearance').click();await snapshot('neurips-starter');
+  await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));await page.locator('#accountButton').click();await page.locator('#accountAppearance').click();await page.locator('[data-palette-choice=western]').click();await page.locator('#themePreference').selectOption('light');await page.locator('#closeAppearance').click();await snapshot('neurips-starter');
   console.log('PASS Western and official NeurIPS starter builds, current-folder copies, placeholder metadata, mobile controls and source/PDF preservation');
 
   await page.locator('#projectsNavButton').click();await page.locator('#createProject').click();await page.locator('#newProjectForm input[name=name]').fill('A new conference paper');await page.locator('#newProjectForm select[name=format]').selectOption('latex');await page.locator('#newProjectForm select[name=template]').selectOption('neurips-2026');await page.locator('#newProjectForm button').click();await page.locator('#workspace').waitFor({state:'visible'});assert.match(await page.locator('#code').inputValue(),/usepackage\{neurips_2026\}/);
-  await page.locator('#projectsNavButton').click();await page.locator('#homePaletteButton').click();await page.locator('[data-palette-choice=forest]').click();await page.locator('#closeAppearance').click();
+  await page.locator('#projectsNavButton').click();await page.locator('#homeAccountButton').click();await page.locator('#accountAppearance').click();await page.locator('[data-palette-choice=forest]').click();await page.locator('#closeAppearance').click();
   assert.deepEqual(errors,[]);console.log('PASS starter selection in New project, restoration of the original palette and no browser errors');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});

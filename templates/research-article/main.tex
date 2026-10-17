@@ -1,0 +1,47 @@
+\documentclass[10pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,booktabs}
+\usepackage[hidelinks]{hyperref}
+\title{Understanding a Simple Research Problem}
+\author{Alex Researcher \\ Department of Computer Science \\ Example University}
+\date{}
+\begin{document}
+\maketitle
+\begin{abstract}
+A useful paper starts with a clear question. This editable example introduces a
+small estimation problem, explains its assumptions, and reports a reproducible
+comparison. Replace the example with your own research.
+\end{abstract}
+\section{Introduction}
+Estimating a signal from noisy measurements connects probability, optimization,
+and practical experiments. We study a simple setting in which every modeling
+choice can be stated explicitly. The classical treatment of information by
+Shannon~\cite{shannon1948} provides useful background.
+\section{A simple model}
+Suppose the observations are $y_i=\theta+\varepsilon_i$, where the noise terms
+are independent, have mean zero, and have variance $\sigma^2$. The sample mean is
+\begin{equation}
+  \widehat\theta=\frac{1}{n}\sum_{i=1}^n y_i,
+  \qquad \mathbb{E}\!\left[(\widehat\theta-\theta)^2\right]=\frac{\sigma^2}{n}.
+  \label{eq:error}
+\end{equation}
+Equation~\eqref{eq:error} predicts how additional observations improve precision.
+\section{Results}
+Table~\ref{tab:results} shows theoretical values for unit noise variance.
+\begin{table}[h]
+\centering
+\caption{Illustrative theoretical error, not experimental measurements.}
+\label{tab:results}
+\begin{tabular}{lrr}\toprule
+Observations & Mean squared error & Standard error \\\midrule
+10 & 0.100 & 0.316 \\
+50 & 0.020 & 0.141 \\
+100 & 0.010 & 0.100 \\\bottomrule
+\end{tabular}
+\end{table}
+\section{Limitations and next steps}
+The independence and constant-variance assumptions may fail in practice.
+Check them before applying the estimator to a new dataset.
+\bibliographystyle{plain}
+\bibliography{references}
+\end{document}

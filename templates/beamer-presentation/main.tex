@@ -1,0 +1,53 @@
+\documentclass[aspectratio=169]{beamer}
+\usetheme{Madrid}
+\usepackage{amsmath,booktabs}
+\title{A Clear Research Presentation}
+\subtitle{Question, method, evidence, and discussion}
+\author{Alex Researcher}
+\institute{Example University}
+\date{October 2026}
+\begin{document}
+\begin{frame}\titlepage\end{frame}
+\begin{frame}{Today}\tableofcontents\end{frame}
+\section{The question}
+\begin{frame}{Start with the question}
+How can repeated measurements improve an estimate?
+\begin{itemize}
+\item Explain why the problem matters.
+\item State the assumptions before presenting the method.
+\item Separate predictions from observed evidence.
+\end{itemize}
+\end{frame}
+\section{The method}
+\begin{frame}{A simple estimator}
+For independent observations $y_i=\theta+\varepsilon_i$,
+\[
+\widehat\theta=\frac{1}{n}\sum_{i=1}^n y_i,
+\qquad \operatorname{Var}(\widehat\theta)=\frac{\sigma^2}{n}.
+\]
+\begin{block}{Interpretation}
+More observations reduce uncertainty when the noise assumptions hold.
+\end{block}
+\end{frame}
+\section{Evidence}
+\begin{frame}{Prediction and limitations}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Theoretical prediction}
+\begin{center}\begin{tabular}{rr}\toprule
+$n$ & Error variance \\\midrule
+10 & 0.100 \\50 & 0.020 \\100 & 0.010 \\\bottomrule
+\end{tabular}\end{center}
+\end{column}
+\begin{column}{0.48\textwidth}
+\textbf{Check before applying}
+\begin{itemize}\item Independent noise?\item Constant variance?\item Biased measurements?\end{itemize}
+\end{column}
+\end{columns}
+\end{frame}
+\section{Discussion}
+\begin{frame}{Takeaways and questions}
+\begin{enumerate}\item Make assumptions visible.\item Use evidence that answers the question.\item Explain what remains uncertain.\end{enumerate}
+\vfill\centering Questions?
+\end{frame}
+\end{document}

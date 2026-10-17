@@ -120,7 +120,7 @@ SAMPLE = {
 \usepackage[colorlinks=true,linkcolor=teal,citecolor=teal]{hyperref}
 
 \title{A space for your next idea}
-\author{IDSL Lab}
+\author{IDSL Editor}
 \date{\today}
 
 \begin{document}
@@ -158,7 +158,7 @@ The challenge is to learn a reverse process that recovers the structure of the d
 '''.encode(),
 'sections/introduction.tex':r'''\section{Introduction}
 
-Write, explore, and refine your ideas here. The IDSL Lab workspace keeps the files, equations, and references that make up your paper together in one project.
+Write, explore, and refine your ideas here. The IDSL Editor workspace keeps the files, equations, and references that make up your paper together in one project.
 
 Switch to Visual mode to edit plain paragraphs and headings. Advanced LaTeX remains available in source cards, so your original commands stay intact.
 
@@ -180,7 +180,7 @@ TYPST_SAMPLE = {
 #align(center)[
   #text(size: 24pt, weight: "bold")[A space for your next idea]
 
-  IDSL Lab
+  IDSL Editor
 ]
 
 #include "sections/introduction.typ"

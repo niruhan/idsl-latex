@@ -123,7 +123,7 @@ def serve(port):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    print('IDSL Lab: ' + env['APP_ORIGIN'], flush=True)
+    print('IDSL Editor: ' + env['APP_ORIGIN'], flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -164,7 +164,7 @@ def start(port=None):
         try:
             with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/session', timeout=1) as response:
                 if response.status == 200:
-                    print(f'IDSL Lab is running at http://127.0.0.1:{port}')
+                    print(f'IDSL Editor is running at http://127.0.0.1:{port}')
                     print('First account: ./labtex setup-token | Stop: ./labtex stop')
                     return
         except OSError:

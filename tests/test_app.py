@@ -113,10 +113,32 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.owner.call(self.base+'/file','PUT',{'path':'figures/test.png','base64':base64.b64encode(blob).decode(),'revision':0})[0],200)
         got=self.owner.call(self.base+'/file?path=figures/test.png')[1];self.assertIsNone(got['content']);self.assertEqual(base64.b64decode(got['base64']),blob)
         self.assertEqual(self.owner.call(self.base+'/rename','POST',{'path':'figures/test.png','newPath':'figures/renamed.png','revision':1})[0],200)
+        self.assertEqual(self.owner.call(self.base+'/rename','POST',{'path':'figures/renamed.png','newPath':'main.tex','revision':2})[0],409)
         raw=self.owner.call(self.base+'/source.zip')[1]
         with zipfile.ZipFile(io.BytesIO(raw)) as z:self.assertEqual(z.read('figures/renamed.png'),blob)
+
         self.assertEqual(self.owner.call(self.base+'/file','DELETE',{'path':'main.tex','revision':1})[0],400)
         self.assertEqual(self.owner.call(self.base+'/file','PUT',{'path':'../escape.tex','content':'no','revision':0})[0],400)
+
+    def test_pdf_download_uses_a_safe_project_filename(self):
+        import urllib.parse
+        with self.app.db() as db:
+            db.execute('INSERT INTO builds VALUES(?,?,?,?,?,?,?,?)',
+                       (self.pid,1,1,'',b'%PDF-test',0,1,'tectonic'))
+        for name, expected in [('Classic paper','Classic paper.pdf'),
+                               ('Résumé / notes: 2026?','Résumé - notes- 2026-.pdf'),
+                               ('draft.pdf','draft.pdf'),
+                               ('Bad"name\r\nX-Test: yes','Bad-name--X-Test- yes.pdf')]:
+            self.assertEqual(self.owner.call(self.base,'PUT',{'name':name})[0],200)
+            conn=http.client.HTTPConnection('127.0.0.1',self.port)
+            conn.request('GET',self.base+'/pdf?download=1',headers={'Cookie':self.owner.cookie})
+            response=conn.getresponse(); disposition=response.getheader('Content-Disposition')
+            self.assertEqual(response.status,200)
+            self.assertEqual(response.read(),b'%PDF-test')
+            self.assertTrue(disposition.startswith('attachment;'))
+            self.assertEqual(urllib.parse.unquote(disposition.split("filename*=UTF-8''")[1]),expected)
+            self.assertIsNone(response.getheader('X-Test'))
+            conn.close()
     def test_zip_import_and_project_isolation(self):
         output=io.BytesIO()
         with zipfile.ZipFile(output,'w') as z:

@@ -17,9 +17,11 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const {id}=await api('/api/projects','POST',{name,format:'typst',template:false});
   for(const [path,content] of Object.entries({
    ...Object.fromEntries(Array.from({length:24},(_,i)=>['images/figure-'+i+'.svg','<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><circle cx="5" cy="5" r="4"/></svg>'])),
+   'images/safe-image.svg':'<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100" onload="window.svgPreviewExecuted=true"><rect width="160" height="100" fill="#edf2e8"/><circle cx="80" cy="50" r="30" fill="#27654e"/><script>window.svgPreviewExecuted=true;</script><image href="https://example.test/preview-probe.png"/></svg>',
    'images/nested/deep/notes.typ':'= A nested note',
    'sections/chapter.typ':'= A chapter'
   }))await api('/api/projects/'+id+'/file','PUT',{path,content,revision:0});
+  await api('/api/projects/'+id+'/file','PUT',{path:'images/pixel.png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=',revision:0});
   fixtureNames.set(id,name);return id;
  }
  try{
@@ -28,6 +30,16 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const before=await api('/api/projects/'+first);
   await open(first);
   assert.equal(await page.locator('#fileTree > button.tree-file').first().getAttribute('title'),'main.typ');
+  const svgBefore=await api('/api/projects/'+first+'/file?path=images/safe-image.svg'),external=[];page.on('request',request=>{if(request.url().includes('example.test/preview-probe'))external.push(request.url());});
+  await file('images/safe-image.svg').click();await page.locator('#binaryPreview img').waitFor();await page.waitForFunction(()=>{const image=document.querySelector('#binaryPreview img');return image.complete&&image.naturalWidth===160;});
+  assert.equal(await page.locator('#sourceEditor').isHidden(),true);assert.equal(await page.locator('#visualTab').textContent(),'Preview');assert.equal(await page.evaluate(()=>Boolean(window.svgPreviewExecuted)),false);assert.equal(await page.locator('#binaryPreview svg,#binaryPreview script,#binaryPreview iframe').count(),0);assert.deepEqual(external,[]);
+  const imageOutput=process.env.TEST_OUTPUT||path.join(process.cwd(),'artifacts');fs.mkdirSync(imageOutput,{recursive:true});await page.screenshot({path:path.join(imageOutput,'svg-image-preview.png'),animations:'disabled'});
+  await page.locator('#sourceTab').click();assert.equal(await page.locator('#code').inputValue(),svgBefore.content);assert.equal(await page.locator('#binaryPreview').isHidden(),true);
+  await page.locator('#visualTab').click();await page.locator('#binaryPreview img').waitFor();
+  await file('images/pixel.png').click();await page.waitForFunction(()=>{const image=document.querySelector('#binaryPreview img');return image?.complete&&image.naturalWidth===1;});assert.equal(await page.locator('#sourceTab').isDisabled(),true);
+  await file('main.typ').click();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='main.typ');assert.equal(await page.locator('#sourceTab').getAttribute('aria-selected'),'true');await page.locator('#visualTab').click();await file('images/safe-image.svg').click();await page.locator('#binaryPreview img').waitFor();await file('main.typ').click();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='main.typ');assert.equal(await page.locator('#visualEditor').isVisible(),true);await page.locator('#sourceTab').click();
+  assert.deepEqual(await api('/api/projects/'+first+'/file?path=images/safe-image.svg'),svgBefore);
+  console.log('PASS SVG/raster image previews, optional SVG source, inert SVG scripts/external resources, restored document mode and unchanged asset bytes');
   await folder('images').click();assert.equal(await folder('images').getAttribute('aria-expanded'),'false');assert.equal(await file('images/figure-0.svg').isVisible(),false);
   await file('sections/chapter.typ').click();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='sections/chapter.typ');assert.equal(await folder('images').getAttribute('aria-expanded'),'false');
   await page.waitForResponse(response=>response.url()===origin+'/api/projects/'+first&&response.request().method()==='GET');

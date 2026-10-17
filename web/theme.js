@@ -3,15 +3,17 @@
  const key='labtex-theme',paletteKey='labtex-palette',media=matchMedia('(prefers-color-scheme: dark)');
  const palettes=[
   {id:'forest',name:'IDSL Forest',note:'The original green workspace',colors:['#183f36','#d9eddf','#fbfcfa']},
-  {id:'western',name:'Western Purple',note:'Western purple and orchid',colors:['#4f2683','#8f55e0','#f3eef9']},
-  {id:'catppuccin',name:'Catppuccin',note:'Latte by day, Mocha by night',colors:['#8839ef','#cba6f7','#1e1e2e']},
-  {id:'dracula',name:'Dracula',note:'Violet, pink, and cool charcoal',colors:['#bd93f9','#ff79c6','#282a36']},
+  {id:'western',name:'Western Purple',note:'White canvas with purple accents',colors:['#4f2683','#8f55e0','#ffffff']},
+  {id:'nord',name:'Nord',note:'Cool slate and arctic blue',colors:['#2e3440','#88c0d0','#eceff4']},
+  {id:'github',name:'GitHub',note:'Clean neutrals with blue accents',colors:['#24292f','#0969da','#ffffff']},
   {id:'solarized',name:'Solarized',note:'Warm paper and muted blue',colors:['#268bd2','#b58900','#fdf6e3']},
  ];
  const validPalette=value=>palettes.some(item=>item.id===value);
+ const legacyPalettes=new Map([['catppuccin','nord'],['dracula','github']]);
+ const storedPalette=value=>legacyPalettes.get(value)||(validPalette(value)?value:'forest');
  let preference='system',palette='forest';
  try{const saved=localStorage.getItem(key);if(['light','dark','system'].includes(saved))preference=saved;}catch{}
- try{const saved=localStorage.getItem(paletteKey);if(validPalette(saved))palette=saved;}catch{}
+ try{const saved=localStorage.getItem(paletteKey);palette=storedPalette(saved);if(saved&&saved!==palette)localStorage.setItem(paletteKey,palette);}catch{}
  function apply(){
   const resolved=preference==='system'?(media.matches?'dark':'light'):preference;
   document.documentElement.dataset.theme=resolved;
@@ -30,7 +32,7 @@
  window.addEventListener('storage',event=>{
   if(event.key===null){preference='system';palette='forest';}
   else if(event.key===key)preference=['light','dark','system'].includes(event.newValue)?event.newValue:'system';
-  else if(event.key===paletteKey)palette=validPalette(event.newValue)?event.newValue:'forest';
+  else if(event.key===paletteKey)palette=storedPalette(event.newValue);
   else return;
   apply();
  });

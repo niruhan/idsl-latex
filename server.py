@@ -170,7 +170,7 @@ CREATE INDEX IF NOT EXISTS project_locations_folder ON project_locations(user_id
         return row
     def require_approved_email(self,db,email):
         if not db.execute('SELECT 1 FROM approved_emails WHERE email=?',(email,)).fetchone():
-            raise Problem('This email is not approved for IDSL Lab. Ask the lab administrator to add your address.',403)
+            raise Problem('This email is not approved for IDSL Editor. Ask the lab administrator to add your address.',403)
     def compile(self,pid,user):
         with self.lock:
             if pid in self.jobs or len(self.jobs)>=2: raise Problem('A build is running. Try again shortly.',429)
@@ -508,6 +508,8 @@ class Handler(BaseHTTPRequestHandler):
                 old,new=safe_path(data['path']),safe_path(data['newPath'])
                 row=db.execute('SELECT revision FROM files WHERE project_id=? AND path=?',(pid,old)).fetchone()
                 if not row or row['revision']!=data.get('revision'): raise Problem('File changed; refresh before renaming.',409)
+                if db.execute('SELECT 1 FROM files WHERE project_id=? AND path=?',(pid,new)).fetchone():
+                    raise Problem('A file already exists at that path. Choose a different name.',409)
                 db.execute('UPDATE files SET path=?,revision=revision+1 WHERE project_id=? AND path=?',(new,pid,old)); db.execute('UPDATE history SET path=? WHERE project_id=? AND path=?',(new,pid,old))
                 if p['main']==old: db.execute('UPDATE projects SET main=? WHERE id=?',(new,pid))
                 app.touch(db,pid); return {'ok':True}
@@ -525,7 +527,11 @@ class Handler(BaseHTTPRequestHandler):
                 row=db.execute('SELECT * FROM builds WHERE project_id=?',(pid,)).fetchone()
                 if not row or (action=='pdf' and not row['pdf']): raise Problem('Compile successfully to generate a PDF.',404)
                 if action=='log': return {'log':row['log'],'success':bool(row['success']),'revision':row['revision']}
-                self.send(row['pdf'],kind='application/pdf',headers={'Content-Disposition':('attachment' if 'download' in query else 'inline')+'; filename="paper.pdf"'}); return
+                name=re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', '-', p['name']).strip(' .') or 'document'
+                filename=name if name.lower().endswith('.pdf') else name+'.pdf'
+                fallback=filename.encode('ascii','replace').decode().replace('?', '_')
+                disposition=('attachment' if 'download' in query else 'inline')+'; filename="'+fallback+'"; filename*=UTF-8\'\''+urllib.parse.quote(filename,safe='')
+                self.send(row['pdf'],kind='application/pdf',headers={'Content-Disposition':disposition}); return
             if action=='members':
                 if method=='GET': return {'members':[dict(x) for x in db.execute('SELECT u.id,u.email,u.name,m.role FROM members m JOIN users u ON u.id=m.user_id WHERE m.project_id=?',(pid,))]}
                 app.access(db,pid,user,owner=True)

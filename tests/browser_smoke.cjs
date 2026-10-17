@@ -60,7 +60,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     fs.writeFileSync(path.join(output, 'browser-compiled.pdf'), pdf);
     const pdfDownload = page.waitForEvent('download');
     await page.locator('#downloadButton').click();
-    await (await pdfDownload).saveAs(path.join(output, 'exported.pdf'));
+    const exported=await pdfDownload;assert.equal(exported.suggestedFilename(),(await page.locator('#projectTitle').textContent())+'.pdf');
+    await exported.saveAs(path.join(output, 'exported.pdf'));
     await page.screenshot({path: path.join(output, 'workspace.png'), fullPage: true});
     console.log('PASS browser-triggered compilation, PDF pane, and PDF export');
 
@@ -119,7 +120,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       await memberPage.locator('.project-entry').filter({hasText:'My first paper'}).click();
       await memberPage.locator('#workspace').waitFor({state:'visible'});
       const projects=(await (await memberContext.request.get(origin+'/api/projects')).json()).projects;
-      assert.equal(projects.length,2);assert.ok(projects.every(p=>p.role==='owner'));
+      assert.equal(projects.length,1);assert.ok(projects.every(p=>p.role==='owner'));
       privateProjects.push(projects[0].id);
       assert.equal((await memberContext.request.get(origin+'/api/projects/'+ownerProject)).status(),404);
       assert.equal((await context.request.get(origin+'/api/projects/'+projects[0].id)).status(),404);

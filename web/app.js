@@ -1,7 +1,7 @@
 import {escapeHTML as esc,renderVisual,renderTypstVisual} from './visual.js';
 const $=id=>document.getElementById(id);
-const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,githubToken:'',backupAuto:false};
-const Home={visible:false,projects:[],folders:[],templates:[],folder:null,sampleId:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
+const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',documentMode:'source',assetUrl:null,dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,githubToken:'',backupAuto:false};
+const Home={visible:false,projects:[],folders:[],templates:[],folder:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
 const FileTree={projects:new Map(),searchKey:null,searchCollapsed:new Set()};
 let saveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false,navigationId=0;const backupTimers=new Map();
 const isTypst=()=>S.file?.path.endsWith('.typ');
@@ -15,7 +15,7 @@ async function api(path,method='GET',body){
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,5000);}
 function fail(e){toast(e.message||String(e));}
 function action(id,fn){$(id).addEventListener('click',()=>Promise.resolve().then(fn).catch(fail));}
-function modal(title,html){$('modalTitle').textContent=title;$('modalBody').innerHTML=html;if(!$('modal').open)$('modal').showModal();}
+function modal(title,html,wide=false){closeAccountMenu();closeFileContextMenu();$('modal').classList.toggle('template-library-dialog',wide);$('modalTitle').textContent=title;$('modalBody').innerHTML=html;if(!$('modal').open)$('modal').showModal();}
 function closeModal(){$('modal').close();}
 function draftKey(){return `labtex-draft:${S.user?.id}:${S.project?.id}:${S.file?.path}`;}
 function keepDraft(){if(S.file&&S.dirty){try{sessionStorage.setItem(draftKey(),JSON.stringify({content:S.text,revision:S.file.revision}));}catch{toast('Browser draft storage is full. Save or download your draft.');}}}
@@ -31,8 +31,28 @@ function highlight(){
 function syncScroll(){$('highlight').scrollTop=$('code').scrollTop;$('highlight').scrollLeft=$('code').scrollLeft;$('lineNumbers').scrollTop=$('code').scrollTop;}
 function updateStats(){const pos=$('code').selectionStart;const before=$('code').value.slice(0,pos);$('cursorPosition').textContent=`Ln ${before.split('\n').length}, Col ${before.length-before.lastIndexOf('\n')}`;$('wordCount').textContent=(S.text.trim().match(/\S+/g)||[]).length+' words';}
 function editable(){return S.project&&S.project.role!=='viewer';}
-function editorMode(mode){S.mode=mode;$('sourceTab').classList.toggle('active',mode==='source');$('visualTab').classList.toggle('active',mode==='visual');$('sourceTab').setAttribute('aria-selected',String(mode==='source'));$('visualTab').setAttribute('aria-selected',String(mode==='visual'));$('sourceEditor').hidden=mode!=='source'||S.file?.content===null;$('visualEditor').hidden=mode!=='visual'||S.file?.content===null;
- if(mode==='visual'&&S.file?.content!==null)(isTypst()?renderTypstVisual:renderVisual)($('visualEditor'),S.text,editable(),text=>setText(text,true));else{$('code').value=S.text;highlight();}
+const imageTypes={svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',avif:'image/avif',bmp:'image/bmp',ico:'image/x-icon'};
+const imageType=()=>imageTypes[S.file?.path.split('.').pop().toLowerCase()];
+function clearAssetPreview(){if(S.assetUrl){URL.revokeObjectURL(S.assetUrl);S.assetUrl=null;}$('binaryPreview').replaceChildren();}
+function renderAssetPreview(){
+ clearAssetPreview();const type=imageType(),pdf=S.file.path.toLowerCase().endsWith('.pdf');
+ if(!type&&!pdf){$('binaryPreview').textContent='Binary asset · Included when compiling and exporting the project.';return;}
+ const content=S.file.content===null?Uint8Array.from(atob(S.file.base64),value=>value.charCodeAt(0)):S.text;
+ S.assetUrl=URL.createObjectURL(new Blob([content],{type:type||'application/pdf'}));const assetUrl=S.assetUrl;
+ // An SVG is loaded as an image resource, never inserted into the page DOM.
+ const el=document.createElement(type?'img':'iframe');el.src=S.assetUrl;el.title=S.file.path;
+ if(type){el.alt=S.file.path;el.addEventListener('error',()=>{if(S.assetUrl!==assetUrl)return;const note=document.createElement('p');note.textContent='This image could not be displayed. Check the file format or use Source for text-based images.';$('binaryPreview').replaceChildren(note);});}
+ $('binaryPreview').append(el);
+}
+function editorMode(mode){
+ S.mode=mode;if(isDocument())S.documentMode=mode;
+ const asset=Boolean(imageType())||S.file?.content===null,preview=asset&&mode==='visual';
+ $('sourceTab').classList.toggle('active',mode==='source');$('visualTab').classList.toggle('active',mode==='visual');$('sourceTab').setAttribute('aria-selected',String(mode==='source'));$('visualTab').setAttribute('aria-selected',String(mode==='visual'));
+ $('sourceEditor').hidden=mode!=='source'||S.file?.content===null;$('visualEditor').hidden=mode!=='visual'||asset;$('binaryPreview').hidden=!preview;
+ $('code').value=S.text;
+ if(preview)renderAssetPreview();
+ else if(mode==='visual'&&S.file?.content!==null)(isTypst()?renderTypstVisual:renderVisual)($('visualEditor'),S.text,editable(),text=>setText(text,true));
+ else highlight();
 }
 async function save(){
  clearTimeout(saveTimer);
@@ -75,7 +95,9 @@ function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toL
  let folderId=0;
  function renderNode(node,parent){
   for(const file of node.files){
-   const b=document.createElement('button');b.className='tree-file'+(S.file?.path===file.path?' active':'');b.title=file.path;const ext=file.path.split('.').pop();b.innerHTML=`<span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(file.path.split('/').at(-1))}</span>${file.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',()=>loadFile(file.path).catch(fail));parent.append(b);
+   const b=document.createElement('button');b.className='tree-file'+(S.file?.path===file.path?' active':'');b.title=file.path;const ext=file.path.split('.').pop();b.innerHTML=`<span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(file.path.split('/').at(-1))}</span>${file.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',()=>loadFile(file.path).catch(fail));b.setAttribute('aria-haspopup','menu');b.setAttribute('aria-controls','fileContextMenu');
+   const contextMenu=event=>{event.preventDefault();const rect=b.getBoundingClientRect();fileMenu({path:file.path,x:event.clientX||rect.left+20,y:event.clientY||rect.bottom,anchor:b}).catch(fail);};
+   b.addEventListener('contextmenu',contextMenu);b.addEventListener('keydown',event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10')contextMenu(event);});parent.append(b);
   }
   for(const [name,folder] of node.folders){
    const row=document.createElement('button'),arrow=document.createElement('span'),label=document.createElement('span'),children=document.createElement('div');
@@ -89,12 +111,14 @@ function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toL
  tree.replaceChildren();renderNode(root,tree);
  $('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';$('mainFile').innerHTML=S.project.files.filter(f=>/\.(tex|typ)$/.test(f.path)).map(f=>`<option value="${esc(f.path)}">${esc(f.path)}</option>`).join('');$('mainFile').value=S.project.main;
 }
-async function loadFile(path,force=false){if(!force&&(!await save()))return;const pid=S.project.id;const f=await api(apiPath('file')+'?path='+encodeURIComponent(path));if(S.project?.id!==pid)return;S.file=f;S.text=f.content??'';S.saved=S.text;S.dirty=false;S.conflict=false;$('filePath').textContent=path;$('fileType').textContent=path.endsWith('.typ')?'Typst':path.endsWith('.tex')?'LaTeX':path.split('.').pop().toUpperCase();$('code').setAttribute('aria-label',isTypst()?'Typst source':'LaTeX source');$('visualTab').disabled=!isDocument();if(!isDocument())S.mode='source';document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable()||!isDocument());$('binaryPreview').hidden=f.content!==null;$('code').readOnly=!editable();markSaved('All changes saved');
- if(f.content===null){const ext=path.split('.').pop().toLowerCase();const mimes={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',pdf:'application/pdf'};$('binaryPreview').replaceChildren();if(mimes[ext]){const el=document.createElement(ext==='pdf'?'iframe':'img');el.src='data:'+mimes[ext]+';base64,'+f.base64;el.alt=path;el.title=path;$('binaryPreview').append(el);}else $('binaryPreview').textContent='Binary asset · Included when compiling and exporting the project.';
- }else{let draft;try{draft=JSON.parse(sessionStorage.getItem(draftKey()));}catch{}if(draft&&draft.content!==f.content){S.text=draft.content;S.dirty=true;markSaved('Recovered browser draft','dirty');if(draft.revision!==f.revision){S.conflict=true;await showConflict();}else{toast('Recovered your unsaved draft.');saveTimer=setTimeout(()=>save().catch(fail),1000);}}}
+async function loadFile(path,force=false){if(!force&&(!await save()))return;const pid=S.project.id;const f=await api(apiPath('file')+'?path='+encodeURIComponent(path));if(S.project?.id!==pid)return;S.file=f;S.text=f.content??'';S.saved=S.text;S.dirty=false;S.conflict=false;$('filePath').textContent=path;$('fileType').textContent=path.endsWith('.typ')?'Typst':path.endsWith('.tex')?'LaTeX':path.split('.').pop().toUpperCase();$('code').setAttribute('aria-label',isTypst()?'Typst source':isDocument()?'LaTeX source':'File source');
+ const asset=Boolean(imageType())||f.content===null;S.mode=isDocument()?S.documentMode:asset?'visual':'source';
+ $('sourceTab').disabled=f.content===null;$('visualTab').disabled=!isDocument()&&!asset;$('visualTab').textContent=asset?'Preview':'Visual';$('saveButton').disabled=!editable()||f.content===null;
+ document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable()||!isDocument());$('code').readOnly=!editable();markSaved('All changes saved');clearAssetPreview();
+ if(f.content!==null){let draft;try{draft=JSON.parse(sessionStorage.getItem(draftKey()));}catch{}if(draft&&draft.content!==f.content){S.text=draft.content;S.dirty=true;markSaved('Recovered browser draft','dirty');if(draft.revision!==f.revision){S.conflict=true;await showConflict();}else{toast('Recovered your unsaved draft.');saveTimer=setTimeout(()=>save().catch(fail),1000);}}}
  revealFile(path);editorMode(S.mode);renderFiles();updateStats();
 }
-async function openProject(pid,{historyMode='push'}={}){if(S.project&&!await save())return;const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Lab';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile','saveButton'])$(id).disabled=!editable();document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable());$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await loadFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path,true);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||(localStorage.getItem('labtex-auto:'+pid)===null&&S.project.main.endsWith('.typ'));$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();if($('autoCompile').checked&&!S.project.build)scheduleCompile();if(!S.invite)setProjectRoute('#project='+pid,historyMode);}
+async function openProject(pid,{historyMode='push'}={}){if(S.project&&!await save())return;const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile','saveButton'])$(id).disabled=!editable();document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable());$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await loadFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path,true);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||(localStorage.getItem('labtex-auto:'+pid)===null&&S.project.main.endsWith('.typ'));$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();if($('autoCompile').checked&&!S.project.build)scheduleCompile();if(!S.invite)setProjectRoute('#project='+pid,historyMode);}
 // A fresh browsing context keeps PDF loads out of page Back/Forward history.
 // Unloading it on the home page also releases the native PDF viewer.
 function replacePdfFrame(src=null){
@@ -113,12 +137,11 @@ async function compile(){if(!S.project||S.building||!editable())return;const bui
 async function projects({historyMode='push',folder=Home.folder}={}){
  if(S.project&&!await save())return;
  ++navigationId;clearTimeout(autoTimer);
- S.project=null;S.file=null;S.dirty=false;S.pdfKey=null;replacePdfFrame();
+ S.project=null;S.file=null;S.dirty=false;S.pdfKey=null;replacePdfFrame();clearAssetPreview();
  $('workspace').hidden=true;$('auth').hidden=true;$('projectHome').hidden=false;
- Home.visible=true;Home.folder=folder;Home.filter='all';$('projectSearch').value='';closeModal();document.title='Projects · IDSL Lab';
+ Home.visible=true;Home.folder=folder;Home.filter='all';$('projectSearch').value='';closeModal();document.title='Projects · IDSL Editor';
  setProjectRoute(projectFolderRoute(folder),historyMode);
  $('projectCount').textContent='Loading projects…';
- const sample=await api('/api/sample-project','POST',{});Home.sampleId=sample.id;
  await refreshProjects();
 }
 function setProjectRoute(hash,mode='push'){
@@ -130,13 +153,19 @@ async function refreshProjects(){
  if(Home.folder&&!Home.folders.some(folder=>folder.id===Home.folder)){Home.folder=null;if(Home.visible)setProjectRoute('#projects','replace');}
  renderProjects();renderStarterProjects();
 }
+function templateCard(template){
+ const card=document.createElement('article');card.className='starter-card '+template.id;
+ card.innerHTML=`<span class="starter-icon" aria-hidden="true">${template.id==='western-presentation'?'W':template.id==='neurips-2026'?'N':template.format==='typst'?'Ty':'TᴇX'}</span><div><h3>${esc(template.name)}</h3><p>${esc(template.description)}</p><span class="starter-format">${template.format==='typst'?'Typst':'LaTeX'}</span></div><button class="outline" data-starter="${esc(template.id)}">Use template <span aria-hidden="true">→</span></button>`;
+ card.querySelector('button').addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const result=await api('/api/projects','POST',{templateId:template.id,folder:Home.folder});await openProject(result.id);}catch(error){fail(error);}finally{button.disabled=false;}});
+ return card;
+}
 function renderStarterProjects(){
- const list=$('starterProjects');list.replaceChildren();
- for(const template of Home.templates){
-  const card=document.createElement('article');card.className='starter-card '+template.id;
-  card.innerHTML=`<span class="starter-icon" aria-hidden="true">${template.format==='typst'?'W':'N'}</span><div><h3>${esc(template.name)}</h3><p>${esc(template.description)}</p><span class="starter-format">${template.format==='typst'?'Typst · Presentation':'LaTeX · Paper'}</span></div><button class="outline" data-starter="${esc(template.id)}">Use template <span aria-hidden="true">→</span></button>`;
-  card.querySelector('button').addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const result=await api('/api/projects','POST',{templateId:template.id,folder:Home.folder});await openProject(result.id);}catch(error){fail(error);}finally{button.disabled=false;}});list.append(card);
- }
+ $('starterProjects').replaceChildren(...Home.templates.filter(template=>template.featured).map(templateCard));
+}
+function templateLibrary(){
+ modal('Template library',`<p class="hint">Choose a starter to create your own editable copy${Home.folder?' in '+esc(projectFolderPath(Home.folder)):''}. Browsing creates nothing.</p><div class="template-library-tools"><label>Search templates<input id="templateSearch" type="search" placeholder="Article, thesis, CV…"></label><label>Format<select id="templateFormat"><option value="all">All formats</option><option value="typst">Typst</option><option value="latex">LaTeX</option></select></label></div><div id="templateLibrary" class="template-library-grid"></div><p id="templatesEmpty" class="hint" hidden>No matching templates.</p>`,true);
+ function render(){const term=$('templateSearch').value.trim().toLowerCase(),format=$('templateFormat').value;const matches=Home.templates.filter(template=>!template.featured&&(format==='all'||template.format===format)&&`${template.name} ${template.description}`.toLowerCase().includes(term));$('templateLibrary').replaceChildren(...matches.map(templateCard));$('templatesEmpty').hidden=matches.length>0;}
+ $('templateSearch').addEventListener('input',render);$('templateFormat').addEventListener('change',render);render();$('templateSearch').focus();
 }
 const projectFolderRoute=id=>'#projects'+(id?'&folder='+encodeURIComponent(id):'');
 function projectFolderChain(id){const chain=[],seen=new Set();while(id&&!seen.has(id)){seen.add(id);const folder=Home.folders.find(folder=>folder.id===id);if(!folder)break;chain.unshift(folder);id=folder.parent;}return chain;}
@@ -179,6 +208,37 @@ function moveProjectDialog(project){
  modal('Move project',`<p>${esc(project.name)}</p><form id="moveProjectForm"><label>Destination folder<select id="projectFolderTarget">${projectFolderOptions()}</select></label><p class="hint">This changes only your project list. Sharing permissions stay the same.</p><div class="actions"><button class="primary">Move project</button></div></form>`);
  $('projectFolderTarget').value=project.folder||'';$('moveProjectForm').addEventListener('submit',event=>{event.preventDefault();moveProjectToFolder(project,$('projectFolderTarget').value||null).catch(fail);});
 }
+function closeProjectMenus(except=null){document.querySelectorAll('.project-actions[open]').forEach(menu=>{if(menu!==except)menu.open=false;});}
+function renameExplorerProject(project){
+ modal('Rename project','<form id="renameProjectForm"><label>Project name<input id="renameProjectName" required maxlength="120" autofocus></label><div class="actions"><button type="button" id="cancelRenameProject" class="outline">Cancel</button><button id="saveProjectName" class="primary">Save name</button></div></form>');
+ const input=$('renameProjectName'),button=$('saveProjectName');let busy=false;
+ input.value=project.name;input.focus();input.select();
+ const update=()=>{button.disabled=busy||!input.value.trim()||input.value.trim()===project.name;};input.addEventListener('input',update);update();
+ action('cancelRenameProject',closeModal);
+ $('renameProjectForm').addEventListener('submit',async event=>{
+  event.preventDefault();if(button.disabled)return;busy=true;update();
+  try{await api('/api/projects/'+project.id,'PUT',{name:input.value.trim()});await refreshProjects();closeModal();toast('Project renamed.');}catch(error){fail(error);}finally{busy=false;update();}
+ });
+}
+function deleteExplorerProject(project){
+ modal('Delete project?',`<p>This permanently deletes <strong>${esc(project.name)}</strong>, including its source files, assets, and saved history, for everyone with access.</p><p class="hint">Export the source first if you need a copy. Existing GitHub backups are retained.</p><form id="deleteExplorerProjectForm"><label>Type the project name to confirm<input id="deleteProjectName" required autocomplete="off" spellcheck="false" autofocus></label><div class="actions"><button type="button" id="cancelDeleteProject" class="outline">Cancel</button><button id="confirmDeleteProject" class="primary" disabled>Delete project</button></div></form>`);
+ const input=$('deleteProjectName'),button=$('confirmDeleteProject');let busy=false;
+ const update=()=>{button.disabled=busy||input.value!==project.name;};input.addEventListener('input',update);input.focus();
+ action('cancelDeleteProject',closeModal);
+ $('deleteExplorerProjectForm').addEventListener('submit',async event=>{
+  event.preventDefault();if(button.disabled)return;busy=true;update();
+  try{await api('/api/projects/'+project.id,'DELETE',{});await refreshProjects();closeModal();toast('Project deleted.');}catch(error){fail(error);}finally{busy=false;update();}
+ });
+}
+function explorerProjectActions(project){
+ const menu=document.createElement('details');menu.className='project-actions';menu.dataset.projectActions=project.id;
+ menu.innerHTML=`<summary class="project-menu-button" title="Project actions" aria-label="Actions for ${esc(project.name)}">⋯</summary><div class="project-action-list">${project.role!=='viewer'?`<button data-rename-project="${project.id}">Rename</button>`:''}<button data-move-project="${project.id}">Move to folder</button>${project.role==='owner'?`<button class="danger" data-delete-project="${project.id}">Delete</button>`:''}</div>`;
+ menu.addEventListener('toggle',()=>{if(menu.open)closeProjectMenus(menu);});
+ for(const [selector,callback] of [['[data-rename-project]',renameExplorerProject],['[data-move-project]',moveProjectDialog],['[data-delete-project]',deleteExplorerProject]]){
+  menu.querySelector(selector)?.addEventListener('click',()=>{menu.open=false;callback(project);});
+ }
+ return menu;
+}
 function projectFolderDialog(folder=null){
  const hasContents=folder&&(Home.projects.some(project=>project.folder===folder.id)||Home.folders.some(child=>child.parent===folder.id));
  modal(folder?'Folder settings':'New project folder',`<form id="projectFolderForm"><label>Folder name<input id="projectFolderName" required maxlength="80" autofocus></label><label>Parent folder<select id="projectFolderParent">${projectFolderOptions(folder?.id)}</select></label><div class="actions">${folder?`<button id="deleteProjectFolder" type="button" class="outline danger" ${hasContents?'disabled title="Move the contents out before deleting this folder"':''}>Delete empty folder</button>`:''}<button class="primary">${folder?'Save folder':'Create folder'}</button></div></form>`);
@@ -209,16 +269,16 @@ function renderProjects(){
   link.innerHTML=`<div class="directory-cover" aria-hidden="true"><svg viewBox="0 0 64 52" fill="none"><path d="M5 12V7a3 3 0 0 1 3-3h17l7 8h24a3 3 0 0 1 3 3v29a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V12Z" fill="currentColor" opacity=".18"/><path d="M5 18v-11a3 3 0 0 1 3-3h17l7 8h24a3 3 0 0 1 3 3v29a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V18h54" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg></div><div class="directory-details"><h2>${esc(folder.name)}</h2><p>${count} project${count===1?'':'s'} <span aria-hidden="true">→</span></p></div>`;link.title=projectFolderPath(folder.id);projectFolderLink(link,folder.id);list.append(link);
  }
  for(const project of matches){
-  const typst=project.main.endsWith('.typ'),sample=project.id===Home.sampleId;
+  const typst=project.main.endsWith('.typ');
   const link=document.createElement('a');link.className='project-entry';link.href='#project='+project.id;link.dataset.project=project.id;
   const date=new Date(project.updated*1000);
   const updated=date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()!==new Date().getFullYear()?{year:'numeric'}:{})});
   const role=project.role==='owner'?'Owned by you':project.role==='editor'?'Shared · Can edit':'Shared · View only';
-  link.innerHTML=`<div class="project-cover ${typst?'typst':'latex'}" aria-hidden="true"><span class="project-format">${typst?'Typst':'LaTeX'}</span>${sample?'<span class="project-sample-badge">SAMPLE</span>':''}<div class="project-page"><span class="project-page-title">${typst?'Aa':'TᴇX'}</span><span class="project-page-line"></span><span class="project-page-line short"></span><span class="project-page-equation">x = √α · x₀</span><span class="project-page-line"></span><span class="project-page-line short"></span></div></div><div class="project-details"><h2 title="${esc(project.name)}">${esc(project.name)}</h2><div class="project-meta"><span>${esc(project.main)}</span><time datetime="${date.toISOString()}" title="${esc(date.toLocaleString())}">${esc(updated)}</time></div><div class="project-owner"><span><span class="owner-dot" aria-hidden="true">${project.role==='owner'?'Y':'S'}</span>${role}</span><span class="project-open" aria-hidden="true">↗</span></div></div>`;
+  link.innerHTML=`<div class="project-cover ${typst?'typst':'latex'}" aria-hidden="true"><span class="project-format">${typst?'Typst':'LaTeX'}</span><div class="project-page"><span class="project-page-title">${typst?'Aa':'TᴇX'}</span><span class="project-page-line"></span><span class="project-page-line short"></span><span class="project-page-equation">x = √α · x₀</span><span class="project-page-line"></span><span class="project-page-line short"></span></div></div><div class="project-details"><h2 title="${esc(project.name)}">${esc(project.name)}</h2><div class="project-meta"><span>${esc(project.main)}</span><time datetime="${date.toISOString()}" title="${esc(date.toLocaleString())}">${esc(updated)}</time></div><div class="project-owner"><span><span class="owner-dot" aria-hidden="true">${project.role==='owner'?'Y':'S'}</span>${role}</span><span class="project-open" aria-hidden="true">↗</span></div></div>`;
   if(project.folder&&(term||Home.filter!=='all')){const location=document.createElement('p');location.className='project-location';location.textContent=projectFolderPath(project.folder);link.querySelector('.project-details').append(location);}
   link.draggable=true;link.addEventListener('dragstart',event=>{event.dataTransfer.setData('application/x-labtex-project',project.id);event.dataTransfer.effectAllowed='move';});
   link.addEventListener('click',event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();openProject(project.id).catch(fail);});
-  const item=document.createElement('div');item.className='project-item';item.append(link);const move=document.createElement('button');move.className='project-move';move.textContent='↪';move.title='Move to folder';move.setAttribute('aria-label','Move '+project.name+' to folder');move.dataset.moveProject=project.id;move.addEventListener('click',()=>moveProjectDialog(project));item.append(move);list.append(item);
+  const item=document.createElement('div');item.className='project-item';item.append(link,explorerProjectActions(project));list.append(item);
  }
  $('projectsEmpty').hidden=matches.length+folders.length>0;
  $('projectsEmpty').querySelector('h2').textContent=term?'No matching projects.':Home.filter==='shared'?'Nothing shared with you yet.':Home.folder?'This folder is empty.':'No projects here yet.';
@@ -235,17 +295,53 @@ async function share(){const r=await api(apiPath('members'));const owner=S.proje
  if(owner){action('createInvite',async()=>{const invite=await api(apiPath('invite'),'POST',{role:$('inviteRole').value});$('inviteResult').innerHTML='<label style="margin-top:18px">Invitation link<input id="inviteUrl" readonly></label><button id="copyInvite" class="outline full">Copy link</button>';$('inviteUrl').value=invite.url;action('copyInvite',async()=>{try{await navigator.clipboard.writeText(invite.url);toast('Invitation link copied.');}catch{$('inviteUrl').select();toast('Select and copy the invitation link.');}});});document.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',async()=>{if(!confirm('Remove this member from the project?'))return;try{await api(apiPath('members'),'DELETE',{userId:b.dataset.remove});await share();}catch(e){fail(e);}}));}}
 async function historyDialog(){if(!S.file||S.file.content===null)return;const r=await api(apiPath('history')+'?path='+encodeURIComponent(S.file.path));modal('File history',`<p>${esc(S.file.path)} · Up to 30 previous saved revisions. Restoring creates a new saved revision.</p><div>${r.versions.map(v=>`<div class="history-row"><div>Revision ${v.revision}<small>${new Date(v.created*1000).toLocaleString()} · saved over by ${esc(v.author)}</small></div><button class="outline" data-version="${v.id}">Inspect</button></div>`).join('')||'<p class="empty-state">Earlier versions appear here after you save changes.</p>'}</div>`);document.querySelectorAll('[data-version]').forEach(b=>b.addEventListener('click',async()=>{try{const v=await api(apiPath('history')+'?path='+encodeURIComponent(S.file.path)+'&id='+b.dataset.version);modal('Revision '+v.revision,`<textarea id="oldVersion" class="version-preview" readonly></textarea><div class="actions"><button id="backHistory" class="outline">Back</button>${editable()?'<button id="restoreVersion" class="primary">Restore this version</button>':''}</div>`);$('oldVersion').value=v.content;action('backHistory',historyDialog);if(editable())action('restoreVersion',async()=>{if(!await save())return;setText(v.content);editorMode(S.mode);await save();closeModal();toast('Version restored.');});}catch(e){fail(e);}}));}
 async function addFile(){if(!await save())return;modal('Add a project file','<form id="addFileForm"><label>Filename<input id="newFileName" placeholder="sections/method.tex" required></label><p>Use slashes to create folders. For example: sections/method.tex</p><div class="actions"><button class="primary">Create file</button></div></form>');$('addFileForm').addEventListener('submit',async e=>{e.preventDefault();try{const path=$('newFileName').value.trim();await api(apiPath('file'),'PUT',{path,content:'',revision:0});S.project=await api(apiPath());closeModal();await loadFile(path);}catch(e){fail(e);}});}
-async function fileMenu(){if(!S.file)return;modal('File actions',`<p>${esc(S.file.path)}</p><div class="row"><button id="downloadFile" class="outline">Download file</button>${editable()?'<button id="renameFile" class="outline">Rename</button><button id="deleteFile" class="outline danger">Delete</button>':''}</div><p>Renaming a file does not rewrite document references. Update any input or image commands that use its old path.</p>`);action('downloadFile',()=>{const bytes=S.file.content===null?Uint8Array.from(atob(S.file.base64),c=>c.charCodeAt(0)):S.text;download(bytes,S.file.path.split('/').pop(),'application/octet-stream');});if(editable()){action('renameFile',async()=>{if(!await save())return;const name=prompt('New path',S.file.path);if(!name||name===S.file.path)return;await api(apiPath('rename'),'POST',{path:S.file.path,newPath:name,revision:S.file.revision});S.project=await api(apiPath());closeModal();await loadFile(name,true);});action('deleteFile',async()=>{if(!await save())return;if(!confirm('Delete '+S.file.path+'? Export your source first if you need a backup.'))return;await api(apiPath('file'),'DELETE',{path:S.file.path,revision:S.file.revision});S.project=await api(apiPath());S.dirty=false;closeModal();await loadFile(S.project.main,true);});}}
+let fileMenuTicket=0,fileMenuAnchor=null;
+function closeFileContextMenu(restoreFocus=false){
+ fileMenuTicket++;const menu=$('fileContextMenu');if(!menu)return;menu.hidden=true;fileMenuAnchor?.setAttribute('aria-expanded','false');
+ if(restoreFocus){const path=fileMenuAnchor?.title;[...document.querySelectorAll('.tree-file')].find(button=>button.title===path)?.focus();}
+}
+async function refreshAfterFileChange(pid,path){
+ if(S.project?.id!==pid)return;const project=await api('/api/projects/'+pid);if(S.project?.id!==pid)return;
+ S.project=project;S.dirty=false;await loadFile(path||project.main,true);scheduleCompile();
+}
+function renameProjectFile(target){
+ modal('Rename file',`<form id="renameFileForm"><label>New path<input id="renameFilePath" required maxlength="220" autofocus></label><p class="hint">Use slashes to move the file into a folder. Update document references to the old path yourself.</p><div class="actions"><button type="button" id="cancelFileAction" class="outline">Cancel</button><button id="confirmRenameFile" class="primary">Rename file</button></div></form>`);
+ const input=$('renameFilePath'),button=$('confirmRenameFile');input.value=target.path;input.focus();input.select();let busy=false;
+ const update=()=>button.disabled=busy||!input.value.trim()||input.value.trim()===target.path;input.addEventListener('input',update);update();action('cancelFileAction',closeModal);
+ $('renameFileForm').addEventListener('submit',async event=>{event.preventDefault();if(button.disabled)return;busy=true;update();try{await api('/api/projects/'+target.pid+'/rename','POST',{path:target.path,newPath:input.value.trim(),revision:target.revision});await refreshAfterFileChange(target.pid,input.value.trim());closeModal();toast('File renamed. Update references to its old path.');}catch(error){fail(error);}finally{busy=false;update();}});
+}
+function deleteProjectFile(target){
+ modal('Delete file?',`<p>Delete <strong>${esc(target.path)}</strong> and its saved history? Document references to it will need updating.</p><form id="deleteFileForm"><div class="actions"><button type="button" id="cancelFileAction" class="outline">Cancel</button><button id="confirmDeleteFile" class="primary">Delete file</button></div></form>`);action('cancelFileAction',closeModal);
+ $('deleteFileForm').addEventListener('submit',async event=>{event.preventDefault();const button=$('confirmDeleteFile');if(button.disabled)return;button.disabled=true;try{await api('/api/projects/'+target.pid+'/file','DELETE',{path:target.path,revision:target.revision});await refreshAfterFileChange(target.pid);closeModal();toast('File deleted.');}catch(error){fail(error);}finally{button.disabled=false;}});
+}
+function replaceProjectFile(target){
+ modal('Replace file',`<form id="replaceFileForm"><p>Replace <strong>${esc(target.path)}</strong>. Its project path stays the same; the previous version is kept in file history.</p><label>Replacement file<input id="replacementFile" type="file" required></label><p class="hint">Choose the same file format. Maximum size: 8 MB.</p><div class="actions"><button type="button" id="cancelFileAction" class="outline">Cancel</button><button id="confirmReplaceFile" class="primary">Replace file</button></div></form>`);action('cancelFileAction',closeModal);
+ $('replaceFileForm').addEventListener('submit',async event=>{event.preventDefault();const file=$('replacementFile').files[0],button=$('confirmReplaceFile');if(!file||button.disabled)return;button.disabled=true;try{if(file.size>8*1024*1024)throw Error('Replacement exceeds 8 MB.');await api('/api/projects/'+target.pid+'/file','PUT',{path:target.path,base64:await base64File(file),revision:target.revision});await refreshAfterFileChange(target.pid,target.path);closeModal();toast('File replaced.');}catch(error){fail(error);}finally{button.disabled=false;}});
+}
+async function fileMenu(options={}){
+ if(!S.project)return;closeFileContextMenu();closeAccountMenu();const ticket=fileMenuTicket,pid=S.project.id,path=options.path||S.file?.path;if(!path||!await save()||S.project?.id!==pid)return;
+ await loadFile(path);if(ticket!==fileMenuTicket||S.project?.id!==pid||S.file?.path!==path||!await save())return;
+ const target={...S.file,pid,content:S.file.content===null?null:S.text},menu=$('fileContextMenu');fileMenuAnchor=options.anchor||document.querySelector('.tree-file.active');fileMenuAnchor?.setAttribute('aria-expanded','true');
+ menu.innerHTML=`<div class="file-menu-heading">${esc(path)}</div><button id="downloadFile" role="menuitem">Download</button>${editable()?'<button id="renameFile" role="menuitem">Rename…</button><button id="replaceFile" role="menuitem">Replace…</button><hr><button id="deleteFile" class="danger" role="menuitem" '+(path===S.project.main?'disabled title="Choose another main document before deleting this file."':'')+'>Delete…</button>':''}`;
+ const item=(id,fn)=>action(id,()=>{closeFileContextMenu();return fn(target);});
+ item('downloadFile',()=>download(target.content===null?Uint8Array.from(atob(target.base64),value=>value.charCodeAt(0)):target.content,path.split('/').pop(),'application/octet-stream'));
+ if(editable()){item('renameFile',renameProjectFile);item('replaceFile',replaceProjectFile);item('deleteFile',deleteProjectFile);}
+ menu.hidden=false;const anchor=$('fileMenuButton').getBoundingClientRect();menu.style.left=Math.max(8,Math.min(innerWidth-menu.offsetWidth-8,options.x??anchor.left))+'px';menu.style.top=Math.max(8,Math.min(innerHeight-menu.offsetHeight-8,options.y??anchor.bottom+5))+'px';menu.querySelector('[role=menuitem]').focus();
+}
+document.addEventListener('click',event=>{if(!event.target.closest('#fileContextMenu,#fileMenuButton'))closeFileContextMenu();});
+document.addEventListener('keydown',event=>{const menu=$('fileContextMenu');if(menu.hidden)return;if(event.key==='Escape'||event.key==='Tab'){closeFileContextMenu(true);if(event.key==='Escape')event.preventDefault();return;}if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;event.preventDefault();const items=[...menu.querySelectorAll('[role=menuitem]:not(:disabled)')],index=items.indexOf(document.activeElement);items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();});
+window.addEventListener('resize',()=>closeFileContextMenu());window.addEventListener('scroll',()=>closeFileContextMenu(),{passive:true});
+
 function insert(kind){if(!editable()||!isDocument()||S.file?.content===null)return;if(S.mode==='visual'&&['bold','italic'].includes(kind)){const selection=getSelection(),node=selection?.anchorNode;const element=node?.nodeType===3?node.parentElement:node;const block=element?.closest?.('[contenteditable=true]');if(block&&$('visualEditor').contains(block)){document.execCommand(kind);block.dispatchEvent(new Event('input',{bubbles:true}));return;}}const area=$('code'),start=S.mode==='source'?area.selectionStart:S.text.length,end=S.mode==='source'?area.selectionEnd:S.text.length;editorMode('source');const selected=area.value.slice(start,end);const snippets={bold:'\\textbf{'+(selected||'bold text')+'}',italic:'\\emph{'+(selected||'italic text')+'}',heading:'\n\\section{'+(selected||'New section')+'}\n',equation:'\n\\begin{equation}\n  '+(selected||'E = mc^2')+'\n\\end{equation}\n',list:'\n\\begin{itemize}\n  \\item '+(selected||'First point')+'\n\\end{itemize}\n',citation:'\\cite{'+(selected||'citation-key')+'}',figure:'\n\\begin{figure}[ht]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{figures/example.png}\n  \\caption{'+(selected||'Your caption')+'}\n  \\label{fig:example}\n\\end{figure}\n'};const typst={bold:'*'+(selected||'bold text')+'*',italic:'_'+(selected||'italic text')+'_',heading:'\n= '+(selected||'New section')+'\n',equation:'\n$ '+(selected||'E = m c^2')+' $\n',list:'\n- '+(selected||'First point')+'\n',citation:'@'+(selected||'citation-key'),figure:'\n#figure(\n  image("figures/example.png", width: 80%),\n  caption: ['+(selected||'Your caption')+'],\n) <fig-example>\n'};area.setRangeText((isTypst()?typst:snippets)[kind],start,end,'end');setText(area.value);area.focus();}
 async function approvedEmailsDialog(){
  const settings=await api('/api/approved-emails');
- modal('Approved IDSL Lab emails',`<p>Only these exact email addresses can register and sign in. Invitations authorize account creation; mailbox ownership is not checked.</p><form id="approvedEmailsForm"><label>One email address per line<textarea id="approvedEmailsList" class="version-preview" spellcheck="false"></textarea></label><p class="hint">Removing an address signs that member out and disables their access. Your administrator email stays approved.</p><div class="actions"><button class="primary">Save approved emails</button></div></form>`);
+ modal('Approved IDSL Editor emails',`<p>Only these exact email addresses can register and sign in. Invitations authorize account creation; mailbox ownership is not checked.</p><form id="approvedEmailsForm"><label>One email address per line<textarea id="approvedEmailsList" class="version-preview" spellcheck="false"></textarea></label><p class="hint">Removing an address signs that member out and disables their access. Your administrator email stays approved.</p><div class="actions"><button class="primary">Save approved emails</button></div></form>`);
  $('approvedEmailsList').value=settings.emails.join('\n');
  $('approvedEmailsForm').addEventListener('submit',async event=>{event.preventDefault();try{await api('/api/approved-emails','PUT',{emails:$('approvedEmailsList').value.split(/[\s,;]+/).filter(Boolean)});closeModal();toast('Approved emails updated.');}catch(e){fail(e);}});
 }
 async function labSignupDialog(links=[]){
  const result=await api('/api/lab-invite');
- modal('Invite IDSL Lab members',`<p>Each link creates one account with its own private projects. Share links only inside the lab. Links expire in seven days and work once.</p><form id="createLabInvites"><label>Number of invitation links<input id="labInviteCount" type="number" min="1" max="20" value="3" required></label><button class="primary">Generate invitation links</button></form>${links.length?'<hr><p>Copy these links now. They are shown only once.</p>'+links.map((link,i)=>`<label>Invitation ${i+1}<input class="new-lab-invite" readonly value="${esc(link.url)}"></label>`).join('')+'<button id="copyLabInvites" class="outline full">Copy all new links</button>':''}<hr><p>Recent invitations</p>${result.invitations.map(invite=>`<div class="member-row"><div><strong>${invite.used_by?'Used':invite.expires*1000<Date.now()?'Expired':'Available'}</strong><small>Created ${new Date(invite.created*1000).toLocaleString()} · expires ${new Date(invite.expires*1000).toLocaleDateString()}</small></div>${!invite.used_by?`<button class="outline danger" data-revoke-invite="${invite.id}">Revoke</button>`:''}</div>`).join('')||'<p>No invitations yet.</p>'}<p class="hint">New users must enter an address on the approved list. An invitation is a secret: anyone holding an unused link can attempt signup. Revoking a link does not disable an existing account.</p>`);
+ modal('Invite IDSL Editor members',`<p>Each link creates one account with its own private projects. Share links only inside the lab. Links expire in seven days and work once.</p><form id="createLabInvites"><label>Number of invitation links<input id="labInviteCount" type="number" min="1" max="20" value="3" required></label><button class="primary">Generate invitation links</button></form>${links.length?'<hr><p>Copy these links now. They are shown only once.</p>'+links.map((link,i)=>`<label>Invitation ${i+1}<input class="new-lab-invite" readonly value="${esc(link.url)}"></label>`).join('')+'<button id="copyLabInvites" class="outline full">Copy all new links</button>':''}<hr><p>Recent invitations</p>${result.invitations.map(invite=>`<div class="member-row"><div><strong>${invite.used_by?'Used':invite.expires*1000<Date.now()?'Expired':'Available'}</strong><small>Created ${new Date(invite.created*1000).toLocaleString()} · expires ${new Date(invite.expires*1000).toLocaleDateString()}</small></div>${!invite.used_by?`<button class="outline danger" data-revoke-invite="${invite.id}">Revoke</button>`:''}</div>`).join('')||'<p>No invitations yet.</p>'}<p class="hint">New users must enter an address on the approved list. An invitation is a secret: anyone holding an unused link can attempt signup. Revoking a link does not disable an existing account.</p>`);
  $('createLabInvites').addEventListener('submit',async event=>{event.preventDefault();try{const created=await api('/api/lab-invite','POST',{count:Number($('labInviteCount').value)});await labSignupDialog(created.links);}catch(e){fail(e);}});
  if(links.length)action('copyLabInvites',async()=>{try{await navigator.clipboard.writeText(links.map((link,i)=>`Invitation ${i+1}: ${link.url}`).join('\n'));toast('Invitation links copied.');}catch{toast('Select and copy each invitation link.');}});
  document.querySelectorAll('[data-revoke-invite]').forEach(button=>button.addEventListener('click',async()=>{try{await api('/api/lab-invite','DELETE',{id:button.dataset.revokeInvite});await labSignupDialog(links.filter(link=>link.id!==button.dataset.revokeInvite));}catch(e){fail(e);}}));
@@ -255,7 +351,7 @@ async function authenticate(){
  if(!S.user){$('auth').hidden=false;$('workspace').hidden=true;$('projectHome').hidden=true;Home.visible=false;S.authMode=session.needsSetup?'setup':S.signup?'register':'login';renderAuth();return;}
  $('auth').hidden=true;
  $('accountButton').textContent=S.user.name.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();$('homeAccountButton').textContent=$('accountButton').textContent;$('homeUserName').textContent=S.user.name;
- $('previewLabel').textContent=S.demo?'LOCAL PREVIEW · Use normal mode for lab accounts':'IDSL Lab · LaTeX + Typst';
+ $('previewLabel').textContent=S.demo?'LOCAL PREVIEW · Use normal mode for lab accounts':'IDSL Editor · LaTeX + Typst';
  let pid=new URLSearchParams(location.hash.slice(1)).get('project');
  if(S.invite&&!S.demo){const joined=await api('/api/join','POST',{token:S.invite});pid=joined.id;S.invite=null;history.replaceState(null,'','#project='+pid);toast('You joined the project.');}
  if(S.signup){S.signup=null;history.replaceState(null,'',location.pathname);}
@@ -263,7 +359,7 @@ async function authenticate(){
 }
 function renderAuth(){
  const mode=S.authMode;
- $('authTitle').textContent=mode==='setup'?'Set up IDSL Lab':mode==='register'?(S.signup?'Create your IDSL Lab account':'Join your coauthors'):'Sign in to IDSL Lab';
+ $('authTitle').textContent=mode==='setup'?'Set up IDSL Editor':mode==='register'?(S.signup?'Create your IDSL Editor account':'Join your coauthors'):'Sign in to IDSL Editor';
  $('authNote').textContent=mode==='setup'?'Create the first account using the token from your server console.':mode==='register'?(S.signup?'Use your approved lab address and choose a password. This invitation creates your own private writing workspace.':'Create an account to accept your project invitation. You can also create your own private projects.'):S.invite?'Sign in to accept this project invitation. New members need an account invitation from the lab administrator.':'Your papers and coauthors are waiting.';
  $('nameLabel').hidden=mode==='login';$('tokenLabel').hidden=mode!=='setup';document.querySelector('input[name=password]').autocomplete=mode==='login'?'current-password':'new-password';
  $('nameLabel').querySelector('input').required=mode!=='login';$('tokenLabel').querySelector('input').required=mode==='setup';
@@ -293,15 +389,33 @@ window.addEventListener('hashchange',async()=>{
 });
 action('closeModal',closeModal);action('projectsButton',projects);action('projectsNavButton',projects);action('sourceTab',()=>editorMode('source'));action('visualTab',()=>editorMode('visual'));action('saveButton',save);action('compileButton',compile);action('firstCompileButton',compile);action('shareButton',share);action('backupButton',backupDialog);action('historyButton',historyDialog);action('newFileButton',addFile);action('fileMenuButton',fileMenu);action('uploadButton',()=>$('uploadFiles').click());
 action('downloadButton',()=>{if(S.project?.build?.success)location.href=apiPath('pdf')+'?download=1';});action('openPdfButton',()=>{if(S.project?.build?.success)window.open(apiPath('pdf'),'_blank','noopener');});action('exportSourceButton',async()=>{if(await save())location.href=apiPath('source.zip');});action('logButton',async()=>{$('logPanel').hidden=!$('logPanel').hidden;if(!$('logPanel').hidden&&S.project?.build){const log=await api(apiPath('log'));$('buildLog').textContent=log.log;renderDiagnostics(log.log);}});action('closeLog',()=>$('logPanel').hidden=true);
-action('projectTitle',async()=>{if(!editable())return;const name=prompt('Project name',S.project.name);if(!name||name===S.project.name)return;await api(apiPath(),'PUT',{name});S.project=await api(apiPath());$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Lab';});
-function accountDialog(){
- modal('Your IDSL Lab account',`<p><strong>${esc(S.user.name)}</strong><br>${esc(S.user.email)}</p><button id="accountProjects" class="outline">My projects</button> <button id="accountAppearance" class="outline">Appearance</button>${S.canInviteLab?'<hr><button id="inviteLabMembers" class="primary">Invite lab members</button><button id="approvedEmailsButton" class="outline">Approved emails</button>':''}${S.demo?'<p>This is a local preview account. Start without --demo to create accounts and invite lab members.</p>':'<hr><button id="signOut" class="outline">Sign out</button>'}${S.project?.role==='owner'?'<hr><p class="hint">Delete this entire project and its saved history.</p><button id="deleteProject" class="outline danger">Delete project</button>':''}`);
- action('accountProjects',projects);action('accountAppearance',appearanceDialog);
- if(S.canInviteLab){action('inviteLabMembers',()=>labSignupDialog());action('approvedEmailsButton',approvedEmailsDialog);}
- if(!S.demo)action('signOut',async()=>{if(!await save())return;await api('/api/logout','POST',{});for(const key of Object.keys(sessionStorage))if(key.startsWith('labtex-draft:'+S.user.id+':'))sessionStorage.removeItem(key);location.href='/';});
- if(S.project?.role==='owner')action('deleteProject',async()=>{if(prompt('Type the project name to permanently delete it:')!==S.project.name)return;await api(apiPath(),'DELETE',{});S.project=null;S.file=null;S.dirty=false;history.replaceState(null,'','/');location.reload();});
+action('projectTitle',async()=>{if(!editable())return;const name=prompt('Project name',S.project.name);if(!name||name===S.project.name)return;await api(apiPath(),'PUT',{name});S.project=await api(apiPath());$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';});
+let accountAnchor=null;
+function closeAccountMenu(restoreFocus=false){
+ const menu=$('accountDropdown');if(!menu)return;menu.hidden=true;
+ for(const id of ['accountButton','homeAccountButton'])$(id).setAttribute('aria-expanded','false');
+ if(restoreFocus)accountAnchor?.focus();
 }
-action('accountButton',accountDialog);action('homeAccountButton',accountDialog);
+function positionAccountMenu(){
+ const menu=$('accountDropdown');if(menu.hidden||!accountAnchor)return;
+ const rect=accountAnchor.getBoundingClientRect();
+ menu.style.left=Math.max(12,Math.min(innerWidth-menu.offsetWidth-12,rect.right-menu.offsetWidth))+'px';
+ menu.style.top=Math.min(rect.bottom+8,Math.max(12,innerHeight-menu.offsetHeight-12))+'px';
+}
+function accountMenu(anchor){
+ const menu=$('accountDropdown'),wasOpen=!menu.hidden&&accountAnchor===anchor;closeAccountMenu();if(wasOpen)return;accountAnchor=anchor;
+ menu.innerHTML=`<div class="account-menu-heading"><strong>${esc(S.user.name)}</strong><small>${esc(S.user.email)}</small></div><button id="accountProjects" role="menuitem">My projects</button><button id="accountAppearance" role="menuitem">Themes &amp; appearance</button>${S.canInviteLab?'<hr><button id="inviteLabMembers" role="menuitem">Invite lab members</button><button id="approvedEmailsButton" role="menuitem">Approved emails</button>':''}${S.demo?'<p class="hint">Local preview account</p>':'<hr><button id="signOut" role="menuitem">Sign out</button>'}${S.project?.role==='owner'?'<hr><button id="deleteProject" class="danger" role="menuitem">Delete project</button>':''}`;
+ function item(id,fn){action(id,()=>{closeAccountMenu();return fn();});}
+ item('accountProjects',projects);item('accountAppearance',appearanceDialog);
+ if(S.canInviteLab){item('inviteLabMembers',labSignupDialog);item('approvedEmailsButton',approvedEmailsDialog);}
+ if(!S.demo)item('signOut',async()=>{if(!await save())return;await api('/api/logout','POST',{});for(const key of Object.keys(sessionStorage))if(key.startsWith('labtex-draft:'+S.user.id+':'))sessionStorage.removeItem(key);location.href='/';});
+ if(S.project?.role==='owner')item('deleteProject',async()=>{if(prompt('Type the project name to permanently delete it:')!==S.project.name)return;await api(apiPath(),'DELETE',{});S.project=null;S.file=null;S.dirty=false;history.replaceState(null,'','/');location.reload();});
+ menu.hidden=false;anchor.setAttribute('aria-expanded','true');positionAccountMenu();menu.querySelector('[role=menuitem]').focus();
+}
+for(const id of ['accountButton','homeAccountButton']){const button=$(id);button.setAttribute('aria-haspopup','menu');button.setAttribute('aria-expanded','false');button.setAttribute('aria-controls','accountDropdown');action(id,()=>accountMenu(button));button.addEventListener('keydown',event=>{if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();accountMenu(button);if(event.key==='ArrowUp')$('accountDropdown').querySelector('[role=menuitem]:last-child')?.focus();}});}
+document.addEventListener('click',event=>{if(!event.target.closest('#accountDropdown,#accountButton,#homeAccountButton'))closeAccountMenu();});
+document.addEventListener('keydown',event=>{const menu=$('accountDropdown');if(menu.hidden)return;if(event.key==='Escape'){event.preventDefault();closeAccountMenu(true);return;}if(event.key==='Tab'){closeAccountMenu(true);return;}if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;event.preventDefault();const items=[...menu.querySelectorAll('[role=menuitem]')],index=items.indexOf(document.activeElement);items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();});
+window.addEventListener('resize',positionAccountMenu);window.addEventListener('scroll',()=>closeAccountMenu(),{passive:true});
 action('helpButton',()=>modal('A workspace that stays out of the way',`<p><strong>Ctrl / Cmd + S</strong> saves. <strong>Ctrl / Cmd + Enter</strong> compiles. Tab inserts two spaces in source mode.</p><p>Download your Overleaf project as a ZIP and import it from the project picker. Choose its main .tex or .typ document in the sidebar. Upload figures, bibliography files, classes, and styles with the upload button.</p><p>Visual mode supports plain paragraphs, simple bold/italic text, and headings. Equations, code, and advanced formatting stay in source blocks for both LaTeX and Typst. Editing is shared through autosave and periodic refresh, with conflict detection; this version does not merge simultaneous keystrokes.</p><p>Up to 30 saved versions per file are available, within a 40 MB history limit per project. Deleting a file removes its history. Browser drafts survive a refresh in the same tab.</p><p>This server allows 300 seconds per build, 8 MB per file, 40 MB of current files per project, and 25 owned projects per account. Shell escape is disabled.</p>`));
 $('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener('input',()=>setText($('code').value));$('code').addEventListener('scroll',syncScroll);$('code').addEventListener('click',updateStats);$('code').addEventListener('keyup',updateStats);$('code').addEventListener('keydown',e=>{if(e.key==='Tab'&&editable()){e.preventDefault();const area=e.target;area.setRangeText('  ',area.selectionStart,area.selectionEnd,'end');setText(area.value);}});document.querySelectorAll('[data-insert]').forEach(b=>{b.addEventListener('pointerdown',event=>{if(S.mode==='visual')event.preventDefault();});b.addEventListener('click',()=>insert(b.dataset.insert));});
 $('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();}catch(e){fail(e);}});
@@ -373,12 +487,14 @@ async function backupDialog(){
 action('createProject',newProject);action('emptyNewProject',newProject);action('importProject',()=>$('importZip').click());action('refreshProjects',refreshProjects);
 action('createProjectFolder',()=>projectFolderDialog());action('sidebarNewFolder',()=>projectFolderDialog());action('manageProjectFolder',()=>projectFolderDialog(Home.folders.find(folder=>folder.id===Home.folder)));
 bindProjectDrop(document.querySelector('[data-project-filter="all"]'),null);
-action('openSampleProject',async()=>{const sample=await api('/api/sample-project','POST',{recreate:true});if(!sample.id)throw Error('Your project limit is reached. Export and delete an unused project before adding the sample.');Home.sampleId=sample.id;await openProject(sample.id);});
+action('browseTemplates',templateLibrary);
 $('projectSearch').addEventListener('input',renderProjects);
 $('projectSort').addEventListener('change',()=>{Home.sort=$('projectSort').value;renderProjects();});
 for(const [id,view] of [['projectGridView','grid'],['projectListView','list']])action(id,()=>{Home.view=view;localStorage.setItem('labtex-project-view',view);renderProjects();});
 document.querySelectorAll('[data-project-filter]').forEach(button=>button.addEventListener('click',()=>{Home.filter=button.dataset.projectFilter;Home.folder=null;setProjectRoute('#projects');renderProjects();}));
 document.addEventListener('keydown',event=>{if(Home.visible&&!$('modal').open&&event.key==='/'&&!/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)){event.preventDefault();$('projectSearch').focus();}});
+document.addEventListener('click',event=>{const menu=event.target.closest('.project-actions');closeProjectMenus(menu);});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('modal').open){const menu=document.querySelector('.project-actions[open]');if(menu){closeProjectMenus();menu.querySelector('summary').focus();event.preventDefault();}}});
 
 function updateThemeControls(){
  const theme=window.labtexTheme;
@@ -389,10 +505,19 @@ function updateThemeControls(){
   $(id).setAttribute('aria-pressed',String(theme.resolved==='dark'));
   $(id).textContent=next==='dark'?'☾':'☼';
  }
- if($('themeResolved'))$('themeResolved').textContent='Currently using the '+theme.resolved+' theme. Your PDF keeps its document colors.';
+ if($('themeResolved'))$('themeResolved').textContent='Currently using the '+theme.resolved+' theme. PDF downloads keep their document colors.';
  document.querySelectorAll('[data-palette-choice]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.paletteChoice===theme.palette)));
  if($('themePreference'))$('themePreference').value=theme.preference;
 }
+function updatePdfTheme(){
+ const dark=localStorage.getItem('labtex-pdf-dark')==='true';
+ $('pdfPreview').classList.toggle('pdf-dark',dark);
+ $('pdfThemeButton').setAttribute('aria-pressed',String(dark));
+ $('pdfThemeButton').title=(dark?'Use original':'Use dark')+' PDF preview colors. Downloads keep their original colors.';
+}
+action('pdfThemeButton',()=>{localStorage.setItem('labtex-pdf-dark',String(localStorage.getItem('labtex-pdf-dark')!=='true'));updatePdfTheme();});
+window.addEventListener('storage',event=>{if(event.key==='labtex-pdf-dark'||event.key===null)updatePdfTheme();});
+updatePdfTheme();
 function appearanceDialog(){
  modal('Appearance',`<p class="hint">Choose your workspace colors. The sun/moon button still switches light and dark with one click.</p><div class="palette-choices" role="group" aria-label="Color theme">${window.labtexTheme.palettes.map(palette=>`<button type="button" class="palette-choice" data-palette-choice="${palette.id}" aria-pressed="false"><span class="palette-swatches" aria-hidden="true">${palette.colors.map(color=>`<i style="background:${color}"></i>`).join('')}</span><strong>${esc(palette.name)}</strong><small>${esc(palette.note)}</small></button>`).join('')}</div><label>Light / dark mode<select id="themePreference" aria-label="Light / dark mode"><option value="system">System · follow your device</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p id="themeResolved" class="theme-note"></p><p>The preference is remembered in this browser and applies to your project home, editor, and sign-in screen.</p><div class="actions"><button id="closeAppearance" class="primary">Done</button></div>`);
  $('themePreference').value=window.labtexTheme.preference;
@@ -401,5 +526,5 @@ function appearanceDialog(){
  action('closeAppearance',closeModal);updateThemeControls();
 }
 for(const id of ['themeButton','homeThemeButton','authThemeButton'])action(id,()=>window.labtexTheme.set(window.labtexTheme.resolved==='dark'?'light':'dark'));
-for(const id of ['paletteButton','homePaletteButton','authPaletteButton'])action(id,appearanceDialog);
+for(const id of ['authPaletteButton'])action(id,appearanceDialog);
 window.addEventListener('labtex-themechange',updateThemeControls);updateThemeControls();

@@ -18,7 +18,7 @@ CI runs the backend/installer tests with a distribution TeX Live installation. N
 
 ## Browser regression test
 
-On Mac, after compiler setup, run all seven browser suites against a temporary database:
+On Mac, after compiler setup, run all ten browser suites against a temporary database:
 
 ```sh
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
@@ -26,13 +26,19 @@ NODE_BIN=/path/to/node \
 python3 tests/run_browser.py
 ```
 
-This covers LaTeX/Typst editing and real builds, the project explorer and navigation, and appearance preferences (one-click Light/Dark switching, System in account settings, reload persistence, device changes, tab synchronization, and mobile controls). It leaves `data/` untouched. Install Playwright separately and use Node 20+; set `CHROME_BIN` when using an existing Chromium browser.
+This covers LaTeX/Typst editing and real builds, the project explorer and navigation, and appearance preferences (one-click Light/Dark switching, System in account settings, reload persistence, device changes, tab synchronization, and mobile controls). PDF preview checks also cover its independent dark-color switch, persistence, tab synchronization, and unchanged downloaded PDF bytes. It leaves `data/` untouched. Install Playwright separately and use Node 20+; set `CHROME_BIN` when using an existing Chromium browser.
 
-File-tree checks cover nested folder controls, keyboard operation, persistence across refreshes and projects, and search results inside collapsed folders.
+File-tree checks cover nested folder controls, keyboard operation, persistence across refreshes and projects, and search results inside collapsed folders. They also check raster/SVG previews, optional SVG source, restoration of document editing mode, unchanged image bytes, and that SVG scripts/external references do not execute.
 
 `browser_project_folders.cjs` checks nested project folders, breadcrumbs, move dialogs and drag/drop, folder links and browser history, search across folders, creation/import into the current folder, rename/reparent, empty-folder deletion, and grid/list/dark/mobile views. It also verifies that moving a project leaves its content and revision unchanged.
 
-`browser_templates_palettes.cjs` checks all five palettes in light/dark mode, text contrast, tab synchronization and persistence, source/PDF preservation, mobile controls, template gallery creation in the current folder, and real Western/NeurIPS builds. Backend template tests also check private independent copies, authentication, quotas, and upstream file hashes in `templates/upstream.json`.
+`browser_templates_palettes.cjs` checks all five palettes in light/dark mode, the Western explorer's white light-mode background, migration of retired palette preferences, text contrast, tab synchronization and persistence, source/PDF preservation, mobile controls, template gallery creation in the current folder, and real Western/NeurIPS builds. Backend template tests also check private independent copies, authentication, quotas, and upstream file hashes in `templates/upstream.json`.
+
+`browser_project_actions.cjs` checks explorer Rename/Move/Delete menus in grid/list and dark/mobile views, keyboard dismissal, name validation, persistence, shared permissions, request failures, typed deletion confirmation, and preservation of unrelated projects. It only deletes fictional disposable fixtures.
+
+`browser_library_layout.cjs` checks library search and format filtering, creation only on request, current-folder copies, account-menu keyboard navigation and dismissal, equal folder/project tile sizes, and footer clearance at desktop, laptop, and mobile viewport sizes. All eight starter templates are compiled in backend tests.
+
+`browser_file_actions.cjs` verifies right-click and keyboard menus, rename collisions, file download, replacement history and conflict protection, deletion confirmation, the main-document guard, viewer permissions, and mobile bounds. PDF exports are checked for project-based filenames.
 
 Bundled starters live under `templates/`; `project_templates.py` lists their public metadata and loads only those fixed directories. Keep personal source out of this catalog. Preserve upstream notices and update recorded hashes deliberately when replacing Touying or the NeurIPS author kit. The release checker permits only the original upstream author contact in each specific attribution file, and the Western logo as a reviewed template image.
 
@@ -66,7 +72,7 @@ NODE_BIN=/path/to/node \
 python3 tests/run_browser.py --screenshots
 ```
 
-This runs `tests/capture_docs.cjs` instead of the regression suites. It requires a fresh database, creates only fictional `example.test` demo accounts and starter documents, captures grid/list/mobile project views, both editors, visual mode, sharing, GitHub settings, dark mode, the palette picker, and the Western/NeurIPS starters into `docs/images/`, then discards the database. It never uses the personal installation or writes to GitHub. The backup screenshot leaves its token field empty; sharing screenshots must not show generated invitation links.
+This runs `tests/capture_docs.cjs` instead of the regression suites. It requires a fresh database, creates only fictional `example.test` demo accounts and starter documents, captures grid/list/mobile project views, both editors (a classic LaTeX article is the main README image), the template library, account dropdown, visual mode, sharing, GitHub settings, dark mode, the palette picker, and the Western/NeurIPS starters into `docs/images/`, then discards the database. It never uses the personal installation or writes to GitHub. The backup screenshot leaves its token field empty; sharing screenshots must not show generated invitation links.
 
 Inspect every screenshot before publishing. Check image metadata as well as visible pixels; never capture live projects or use redaction as a substitute for a disposable fixture.
 

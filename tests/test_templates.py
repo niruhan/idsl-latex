@@ -19,6 +19,9 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(self.owner.call('/api/templates')[1]['templates'], list(TEMPLATES))
         self.assertEqual(self.owner.call('/api/projects')[1], before)
         self.assertEqual(test_app.Client(self.port).call('/api/templates')[0], 401)
+        self.assertEqual([item['id'] for item in TEMPLATES if item.get('featured')],
+                         ['western-presentation', 'neurips-2026'])
+        self.assertEqual(len(TEMPLATES), 8)
 
     def test_templates_create_independent_private_copies_in_the_selected_folder(self):
         folder = self.owner.call('/api/project-folders', 'POST', {'name': 'Starters'})[1]['id']
@@ -78,6 +81,17 @@ class TemplateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'TYPST_PACKAGE_PATH': folder, 'TYPST_PACKAGE_CACHE_PATH': folder}):
             result = compile_project(files, main_document(files))
         self.assertTrue(result['success'], result['log'])
+
+    def test_library_starters_compile(self):
+        import os
+        for template in TEMPLATES:
+            if template.get('featured'): continue
+            with self.subTest(template=template['id']):
+                if template['format'] == 'typst' and not shutil.which(os.getenv('TYPST_BIN', 'typst')):
+                    continue
+                _, files = template_files(template['id'])
+                result = compile_project(files, main_document(files))
+                self.assertTrue(result['success'], result['log'])
 
 
 if __name__ == '__main__': unittest.main()

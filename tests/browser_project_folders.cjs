@@ -22,7 +22,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await page.waitForURL('**/#projects&folder='+folder.id);return folder.id;
  }
  async function move(id,folder){
-  await page.locator('[data-move-project="'+id+'"]').click();await page.locator('#projectFolderTarget').selectOption(folder||'');
+  await page.locator('[data-project-actions="'+id+'"] summary').click();await page.locator('[data-move-project="'+id+'"]').click();await page.locator('#projectFolderTarget').selectOption(folder||'');
   await page.locator('#moveProjectForm button').click();await page.locator('#moveProjectForm').waitFor({state:'hidden'});
   assert.equal((await read('/api/projects')).projects.find(project=>project.id===id).folder,folder);
  }

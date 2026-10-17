@@ -1,32 +1,32 @@
-# IDSL Lab — LaTeX + Typst
+# IDSL Editor — LaTeX + Typst
 
 A local workspace for writing LaTeX and Typst, with a project explorer, visual/source editing, and a PDF preview. Run it on your Mac or host it for a small research group.
 
 ## Screenshots
 
-![Typst editor with source and compiled PDF](docs/images/typst-workspace.png)
+![Classic LaTeX article with source and compiled PDF](docs/images/workspace.png)
 
 | Project explorer | Dark theme |
 | --- | --- |
 | [![Project explorer with LaTeX and Typst documents](docs/images/projects.png)](docs/images/projects.png) | [![Dark Typst editor](docs/images/dark-theme.png)](docs/images/dark-theme.png) |
 
-More views: [LaTeX](docs/images/workspace.png) · [Visual editor](docs/images/visual-editor.png) · [Themes](docs/images/themes.png) · [Western slides](docs/images/western-presentation.png) · [NeurIPS paper](docs/images/neurips-paper.png) · [Project list](docs/images/projects-list.png) · [Mobile](docs/images/projects-mobile.png) · [Sharing](docs/images/sharing.png) · [GitHub backups](docs/images/github-backups.png).
+More views: [Typst](docs/images/typst-workspace.png) · [Template library](docs/images/template-library.png) · [Visual editor](docs/images/visual-editor.png) · [Image preview](docs/images/image-preview.png) · [File actions](docs/images/file-actions.png) · [Account menu](docs/images/account-menu.png) · [Themes](docs/images/themes.png) · [Western slides](docs/images/western-presentation.png) · [NeurIPS paper](docs/images/neurips-paper.png) · [Project actions](docs/images/project-actions.png) · [Project list](docs/images/projects-list.png) · [Mobile](docs/images/projects-mobile.png) · [Sharing](docs/images/sharing.png) · [GitHub backups](docs/images/github-backups.png).
 
 All screenshots use a temporary database, fictional demo accounts, and starter documents. They contain no real projects, credentials, or usable invitation links.
 
 ## Features
 
-- **Project explorer:** organize projects into nested folders; move them with the arrow button or drag and drop. Cards/list, search, sorting, and format/ownership filters help you find documents. **My projects** saves and returns home.
-- **LaTeX + Typst:** source and basic visual editing, multi-file projects with collapsible folders, figures, and bibliographies.
-- **PDF preview:** manual or automatic compilation, clickable error locations, and PDF download.
+- **Project explorer:** organize projects into nested folders; use **⋯** to rename, move, or delete a project, or drag it onto a folder. Cards/list, search, sorting, and format/ownership filters help you find documents. **My projects** saves and returns home.
+- **LaTeX + Typst:** source and basic visual editing, multi-file projects with collapsible folders, image previews (including SVG), right-click file actions, figures, and bibliographies.
+- **PDF preview:** manual or automatic compilation, clickable error locations, project-named PDF downloads, and an independent **Dark PDF** preview toggle.
 - **Sharing:** invite coauthors to individual projects with editor or view-only access.
 - **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.
 - **GitHub backups:** keep all projects in one repository or use a separate repository per document; optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
 - **Import/export:** import project ZIPs (including Overleaf exports), upload assets, and download complete source ZIPs.
-- **Themes:** choose IDSL Forest, Western Purple, Catppuccin, Dracula, or Solarized from **Themes**; switch light/dark with one click on the sun/moon button.
-- **Ready-to-use templates:** start a private copy of the Western Typst presentation or NeurIPS 2026 LaTeX paper, including its official style and checklist.
+- **Themes:** choose IDSL Forest, Western Purple, Nord, GitHub, or Solarized under **Account → Themes & appearance**; switch light/dark with one click on the sun/moon button.
+- **Ready-to-use templates:** Western slides and NeurIPS are featured; **More templates** offers a Typst introduction, classic LaTeX article, Western thesis scaffold, coursework, Beamer slides, and academic CV.
 
-Visual mode supports basic headings, paragraphs, emphasis, and Typst lists. Advanced equations/templates remain editable in source cards. The Typst sample belongs to your account; repeat visits preserve edits and avoid duplicates.
+Visual mode supports basic headings, paragraphs, emphasis, and Typst lists. Advanced equations/templates remain editable in source cards. Templates create private, editable copies only when you choose one.
 
 ## Quick start on macOS
 
@@ -42,7 +42,7 @@ cd idsl-latex
 
 1. Open **[http://127.0.0.1:8765](http://127.0.0.1:8765)**.
 2. Use the printed setup token to create your account and choose a password.
-3. Click **Open sample**, choose a starter under **Start with a template**, or use **New project**.
+3. Choose a featured starter, open **More templates**, or use **New project**.
 
 Setup installs and checks both compilers inside this checkout. No Docker, Node.js, or full TeX installation is required. The first setup/build needs internet access.
 
@@ -64,5 +64,7 @@ Shared hosting requires x86_64 Linux, Python 3.10+, systemd, cgroup v2, and Bubb
 | Privacy and isolation boundaries | [Security](SECURITY.md) |
 
 Projects/accounts stay in ignored `data/`; compilers, caches, and setup tokens stay in ignored `.local/`. Keep those directories private when committing or sharing source.
+
+**Disclaimer:** This project was vibecoded with Codex. Review and test it for your needs before relying on it.
 
 MIT licensed. See [LICENSE](LICENSE) and [third-party licenses](THIRD_PARTY.md).
