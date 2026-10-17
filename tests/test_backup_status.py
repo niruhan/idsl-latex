@@ -67,6 +67,10 @@ class ProjectBackupStatusTests(unittest.TestCase):
         self.assertEqual(self.status()['repository'], 'example/one-paper')
         self.assertEqual(self.owner.call(self.base, 'DELETE', {})[0], 200)
         with self.app.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM shared_project_backups WHERE project_id=?', (self.pid,)).fetchone()[0], 1)
+        name=self.owner.call('/api/trash')[1]['projects'][0]['name']
+        self.assertEqual(self.owner.call('/api/trash/'+self.pid, 'DELETE', {'name':name})[0], 200)
+        with self.app.db() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM shared_project_backups WHERE project_id=?', (self.pid,)).fetchone()[0], 0)
 
     def test_failure_and_changed_destination_do_not_report_a_current_global_backup(self):

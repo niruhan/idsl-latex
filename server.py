@@ -16,6 +16,7 @@ MAX_OWNED_PROJECTS=25
 MAX_PROJECT_FOLDERS=100
 MAX_FOLDER_DEPTH=10
 MAX_HISTORY=40*1024*1024
+TRASH_RETENTION=30*24*60*60
 PUBLIC_POSTS={'/api/setup','/api/login','/api/register-lab'}
 JSON_STRUCTURE=re.compile(r'[",\[\]{}]')
 
@@ -27,6 +28,9 @@ def export_disposition(project_name, extension, attachment=True):
 
 class BoundedHTTPServer(ThreadingHTTPServer):
     daemon_threads=True
+    def service_actions(self):
+        try: self.app.cleanup_trash()
+        except sqlite3.OperationalError: pass  # Retry cleanup after a temporary database lock.
     def __init__(self,*args,**kwargs):
         self.slots=threading.BoundedSemaphore(8)
         self.uploads=threading.BoundedSemaphore(2)
@@ -62,6 +66,11 @@ def email_address(s):
     if len(s)>200 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',s): raise Problem('Enter a valid email address.')
     return s
 
+def delete_project_rows(db,pid):
+    for table in ('members','files','history','invites','builds','project_backups','shared_project_backups','project_locations','project_trash'):
+        db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
+    db.execute('DELETE FROM projects WHERE id=?',(pid,))
+
 class App:
     def __init__(self,data,origin,compiler_url=None,demo=False):
         self.data=Path(data).resolve(); self.data.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -70,11 +79,13 @@ class App:
         self.typst=TypstService(self)
         self.setup_token=os.getenv('SETUP_TOKEN') or secrets.token_urlsafe(24)
         self.lock=threading.Lock(); self.jobs=set(); self.attempts={}
+        self.trash_lock=threading.Lock(); self.trash_checked=0
         with self.db() as db:
             db.executescript('''PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT UNIQUE,name TEXT,password TEXT);
 CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user_id TEXT,expires REAL);
 CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT,owner TEXT,main TEXT,revision INTEGER,updated REAL);
+CREATE TABLE IF NOT EXISTS project_trash(project_id TEXT PRIMARY KEY,deleted REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS members(project_id TEXT,user_id TEXT,role TEXT,PRIMARY KEY(project_id,user_id));
 CREATE TABLE IF NOT EXISTS files(project_id TEXT,path TEXT,content BLOB,revision INTEGER,PRIMARY KEY(project_id,path));
 CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY,project_id TEXT,path TEXT,content BLOB,revision INTEGER,author TEXT,created REAL);
@@ -107,6 +118,7 @@ AND b.last_url='https://github.com/'||s.repository||'/commit/'||b.last_commit'''
             if demo:
                 db.execute('INSERT OR IGNORE INTO users VALUES(?,?,?,?)',('demo','preview@example.test','Local preview','!'))
                 if not db.execute("SELECT 1 FROM projects WHERE owner='demo'").fetchone(): self.new_project(db,'demo','A space for your next idea',SAMPLE)
+        self.cleanup_trash(force=True)
     @contextmanager
     def db(self):
         db=sqlite3.connect(self.path,timeout=20); db.row_factory=sqlite3.Row
@@ -155,7 +167,7 @@ AND b.last_url='https://github.com/'||s.repository||'/commit/'||b.last_commit'''
             db.execute('INSERT OR REPLACE INTO project_locations VALUES(?,?,?)',(user_id,pid,folder_id))
     def new_project(self,db,owner,name,files,folder=None):
         if db.execute('SELECT COUNT(*) FROM projects WHERE owner=?',(owner,)).fetchone()[0]>=MAX_OWNED_PROJECTS:
-            raise Problem('You can own up to 25 projects. Export and delete an unused project first.',413)
+            raise Problem('You can own up to 25 projects, including Trash. Permanently delete an unused project from Trash first.',413)
         if folder is not None: self.folder(db,owner,folder)
         pid=secrets.token_hex(12)
         main=main_document(files)
@@ -163,10 +175,21 @@ AND b.last_url='https://github.com/'||s.repository||'/commit/'||b.last_commit'''
         db.execute('INSERT INTO members VALUES(?,?,?)',(pid,owner,'owner'))
         db.executemany('INSERT INTO files VALUES(?,?,?,1)',[(pid,p,c) for p,c in files.items()]); self.locate_project(db,owner,pid,folder); return pid
     def access(self,db,pid,user,write=False,owner=False):
-        row=db.execute('SELECT p.*,m.role FROM projects p JOIN members m ON p.id=m.project_id WHERE p.id=? AND m.user_id=?',(pid,user['id'])).fetchone()
+        row=db.execute('SELECT p.*,m.role FROM projects p JOIN members m ON p.id=m.project_id WHERE p.id=? AND m.user_id=? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=p.id)',(pid,user['id'])).fetchone()
         if not row: raise Problem('Project not found.',404)
         if (write and row['role']=='viewer') or (owner and row['role']!='owner'): raise Problem('You do not have permission for this action.',403)
         return dict(row)
+    def cleanup_trash(self,force=False):
+        if not force and time.time()-self.trash_checked<60: return
+        if not self.trash_lock.acquire(False): return
+        try:
+            with self.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                expired=[row['project_id'] for row in db.execute('SELECT project_id FROM project_trash WHERE deleted<=?',(time.time()-TRASH_RETENTION,))]
+                for pid in expired:
+                    delete_project_rows(db,pid);self.typst.discard(pid=pid)
+            self.trash_checked=time.time()
+        finally: self.trash_lock.release()
     def touch(self,db,pid): db.execute('UPDATE projects SET revision=revision+1,updated=? WHERE id=?',(time.time(),pid))
     def move_files(self,db,project,data):
         """Move a file or virtual directory atomically, including history and main."""
@@ -448,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
             if type(shared_only) is not bool: raise Problem('Choose a valid backup layout.')
             with app.db() as db:
                 user=self.user(db)
-                projects=[dict(r) for r in db.execute('SELECT id,name FROM projects WHERE owner=? ORDER BY id',(user['id'],))]
+                projects=[dict(r) for r in db.execute('SELECT id,name FROM projects p WHERE owner=? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=p.id) ORDER BY id',(user['id'],))]
                 shared_target=None
                 if shared_only:
                     target=db.execute('SELECT * FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone()
@@ -508,6 +531,19 @@ class Handler(BaseHTTPRequestHandler):
                     app.new_project(db,user['id'],'My first paper' if path=='/api/register-lab' else 'A space for your next idea',SAMPLE)
                 result,headers=self.login(db,user); db.commit(); self.send(result,headers=headers); return
             user=self.user(db)
+            if path=='/api/trash' and method=='GET':
+                return {'projects':[dict(row) for row in db.execute('SELECT p.id,p.name,p.main,t.deleted,t.deleted+? AS expires FROM projects p JOIN project_trash t ON t.project_id=p.id WHERE p.owner=? AND t.deleted>? ORDER BY t.deleted DESC',(TRASH_RETENTION,user['id'],time.time()-TRASH_RETENTION))]}
+            trashed=re.fullmatch(r'/api/trash/([a-f0-9]{24})',path)
+            if trashed:
+                if method not in ('POST','DELETE'): raise Problem('Not found.',404)
+                db.execute('BEGIN IMMEDIATE');pid=trashed[1]
+                row=db.execute('SELECT p.name FROM projects p JOIN project_trash t ON t.project_id=p.id WHERE p.id=? AND p.owner=? AND t.deleted>?',(pid,user['id'],time.time()-TRASH_RETENTION)).fetchone()
+                if not row: raise Problem('Project not found in Trash.',404)
+                if method=='POST': db.execute('DELETE FROM project_trash WHERE project_id=?',(pid,))
+                else:
+                    if data.get('name')!=row['name']: raise Problem('Confirm the project name before permanently deleting it.',409)
+                    delete_project_rows(db,pid);app.typst.discard(pid=pid)
+                return {'ok':True}
             if path=='/api/typst-capabilities' and method=='GET': return app.typst.capabilities()
             if path=='/api/templates' and method=='GET': return {'templates':list(TEMPLATES)}
             if path=='/api/project-folders':
@@ -529,7 +565,7 @@ class Handler(BaseHTTPRequestHandler):
                     db.execute('UPDATE project_folders SET name=?,parent_id=?,updated=? WHERE id=?',(name,parent,time.time(),fid))
                 else:
                     children=db.execute('SELECT 1 FROM project_folders WHERE user_id=? AND parent_id=?',(user['id'],fid)).fetchone()
-                    projects=db.execute('SELECT 1 FROM project_locations l JOIN members m ON m.user_id=l.user_id AND m.project_id=l.project_id WHERE l.user_id=? AND l.folder_id=?',(user['id'],fid)).fetchone()
+                    projects=db.execute('SELECT 1 FROM project_locations l JOIN members m ON m.user_id=l.user_id AND m.project_id=l.project_id WHERE l.user_id=? AND l.folder_id=? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=l.project_id)',(user['id'],fid)).fetchone()
                     if children or projects: raise Problem('Move this folder’s projects and subfolders before deleting it.',409)
                     db.execute('DELETE FROM project_locations WHERE user_id=? AND folder_id=?',(user['id'],fid))
                     db.execute('DELETE FROM project_folders WHERE id=? AND user_id=?',(fid,user['id']))
@@ -539,7 +575,7 @@ class Handler(BaseHTTPRequestHandler):
                 key='typst_sample:'+user['id']
                 previous=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
                 if previous:
-                    existing=db.execute('SELECT id FROM projects WHERE id=? AND owner=?',(previous['value'],user['id'])).fetchone()
+                    existing=db.execute('SELECT id FROM projects p WHERE id=? AND owner=? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=p.id)',(previous['value'],user['id'])).fetchone()
                     if existing: return {'id':existing['id']}
                     if data.get('recreate') is not True: return {'id':None}
                 count=db.execute('SELECT COUNT(*) FROM projects WHERE owner=?',(user['id'],)).fetchone()[0]
@@ -579,11 +615,11 @@ class Handler(BaseHTTPRequestHandler):
                 if 'labtex_session' in cookie: db.execute('DELETE FROM sessions WHERE token=?',(digest(cookie['labtex_session'].value),))
                 self.send({'ok':True},headers={'Set-Cookie':self.cookie('',0)}); return
             if path=='/api/join' and method=='POST':
-                db.execute('BEGIN IMMEDIATE'); invite=db.execute('SELECT * FROM invites WHERE token=? AND expires>?',(digest(str(data.get('token',''))),time.time())).fetchone()
+                db.execute('BEGIN IMMEDIATE'); invite=db.execute('SELECT * FROM invites i WHERE token=? AND expires>? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=i.project_id)',(digest(str(data.get('token',''))),time.time())).fetchone()
                 if not invite: raise Problem('Invitation has expired or was used.',403)
                 db.execute('INSERT OR IGNORE INTO members VALUES(?,?,?)',(invite['project_id'],user['id'],invite['role'])); db.execute('DELETE FROM invites WHERE token=?',(invite['token'],)); return {'id':invite['project_id']}
             if path=='/api/projects':
-                if method=='GET': return {'projects':[dict(x) for x in db.execute('SELECT p.id,p.name,p.main,p.updated,m.role,l.folder_id AS folder FROM projects p JOIN members m ON p.id=m.project_id LEFT JOIN project_locations l ON l.project_id=p.id AND l.user_id=m.user_id WHERE m.user_id=? ORDER BY p.updated DESC',(user['id'],))]}
+                if method=='GET': return {'projects':[dict(x) for x in db.execute('SELECT p.id,p.name,p.main,p.updated,m.role,l.folder_id AS folder FROM projects p JOIN members m ON p.id=m.project_id LEFT JOIN project_locations l ON l.project_id=p.id AND l.user_id=m.user_id WHERE m.user_id=? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=p.id) ORDER BY p.updated DESC',(user['id'],))]}
                 if method=='POST':
                     db.execute('BEGIN IMMEDIATE')
                     if 'templateId' in data:
@@ -632,8 +668,8 @@ class Handler(BaseHTTPRequestHandler):
                     app.touch(db,pid); return {'ok':True}
                 if method=='DELETE':
                     app.access(db,pid,user,owner=True)
-                    for table in ('members','files','history','invites','builds','project_backups','shared_project_backups','project_locations'): db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
-                    db.execute('DELETE FROM projects WHERE id=?',(pid,));app.typst.discard(pid=pid); return {'ok':True}
+                    db.execute('INSERT INTO project_trash VALUES(?,?)',(pid,time.time()))
+                    db.execute('DELETE FROM invites WHERE project_id=?',(pid,));app.typst.discard(pid=pid);return {'ok':True}
             if action=='file':
                 name=safe_path(query.get('path',[data.get('path','')])[0]); row=db.execute('SELECT * FROM files WHERE project_id=? AND path=?',(pid,name)).fetchone()
                 if method=='GET':

@@ -69,12 +69,12 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 
   await page.evaluate(()=>{window.labtexTheme.setPalette('western');window.labtexTheme.set('dark');});await page.setViewportSize({width:390,height:844});await page.locator('#projectGridView').click();await exportSource(page,owner,id,'Ready to archive',sourceFiles);await menu(page,id).locator('summary').click();
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile action menu must fit the viewport');await page.screenshot({path:path.join(output,'project-actions-mobile.png'),fullPage:true,animations:'disabled'});
-  await page.locator('[data-delete-project="'+id+'"]').click();assert.equal(await page.locator('#confirmDeleteProject').isDisabled(),true);await page.locator('#deleteProjectName').fill('Wrong name');assert.equal(await page.locator('#confirmDeleteProject').isDisabled(),true);await page.locator('#cancelDeleteProject').click();assert.equal((await api(owner,base)).name,'Ready to archive');
-  await choose(page,id,'delete');await page.locator('#deleteProjectName').fill('Ready to archive');assert.equal(await page.locator('#confirmDeleteProject').isDisabled(),false);await page.screenshot({path:path.join(output,'delete-project-confirmation.png'),fullPage:true,animations:'disabled'});await page.locator('#confirmDeleteProject').click();await page.locator('#deleteExplorerProjectForm').waitFor({state:'hidden'});
+  await page.locator('[data-delete-project="'+id+'"]').click();assert.equal(await page.locator('#confirmDeleteProject').isEnabled(),true);await page.locator('#cancelDeleteProject').click();assert.equal((await api(owner,base)).name,'Ready to archive');
+  await choose(page,id,'delete');assert.equal(await page.locator('#confirmDeleteProject').isDisabled(),false);await page.screenshot({path:path.join(output,'delete-project-confirmation.png'),fullPage:true,animations:'disabled'});await page.locator('#confirmDeleteProject').click();await page.locator('#deleteExplorerProjectForm').waitFor({state:'hidden'});
   assert.equal(await item(page,id).count(),0);assert.ok(page.url().endsWith('&folder='+folder));await page.locator('#projectsEmpty').waitFor({state:'visible'});
   for(const context of [owner,editor.context,viewer.context])assert.equal((await context.request.get(origin+base)).status(),404);
   assert.equal((await owner.request.get(origin+base+'/file?path=main.typ')).status(),404);assert.equal((await api(owner,'/api/projects/'+keep)).name,'Keep this paper');
   await page.reload();await page.locator('#projectsEmpty').waitFor({state:'visible'});assert.equal(await item(page,id).count(),0);assert.deepEqual(errors,[]);
-  console.log('PASS dark/mobile actions, typed confirmation, cancel, deletion for all collaborators, empty-folder state and preservation of other projects');
+  console.log('PASS dark/mobile actions, Trash confirmation, cancel, deletion for all collaborators, empty-folder state and preservation of other projects');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});

@@ -5,33 +5,30 @@
 <div id="projectHome" hidden>
  <header class="home-topbar">
   <a class="brand" href="#projects" aria-label="IDSL Editor projects"><span class="mark" aria-hidden="true">I<span>τ</span></span> IDSL Editor</a>
-  <span class="home-topbar-caption">A workspace for your ideas</span>
   <div class="top-spacer"></div><button id="homeThemeButton" class="theme-button" title="Appearance" aria-label="Appearance">◐</button><button id="homeAccountButton" class="avatar" title="Account" aria-label="Account">L</button>
  </header>
  <div class="home-body">
   <aside class="home-sidebar" aria-label="Project navigation">
-   <div class="eyebrow">WORKSPACE</div>
    <nav class="home-navigation" aria-label="Filter projects">
     <button class="home-nav active" data-project-filter="all" aria-current="page"><span aria-hidden="true">▦</span> All projects <small id="allProjectsCount">0</small></button>
     <button class="home-nav" data-project-filter="owned"><span aria-hidden="true">▱</span> My projects</button>
     <button class="home-nav" data-project-filter="shared"><span aria-hidden="true">♧</span> Shared with me</button>
+    <button id="openTrash" class="home-nav"><span aria-hidden="true">♲</span> Trash</button>
     <div class="home-nav-divider"></div><div class="eyebrow home-formats-label">DOCUMENT FORMATS</div>
     <button class="home-nav" data-project-filter="typst"><span class="nav-format" aria-hidden="true">Ty</span> Typst</button>
     <button class="home-nav" data-project-filter="latex"><span class="nav-format" aria-hidden="true">TeX</span> LaTeX</button>
    </nav>
    <section class="home-folders"><div class="home-folders-heading"><span class="eyebrow">FOLDERS</span><button id="sidebarNewFolder" class="icon" title="New project folder" aria-label="New project folder">＋</button></div><nav id="projectFolderNav" aria-label="Project folders"></nav><p id="noProjectFolders">Create a folder to group your projects.</p></section>
-   <div class="home-sidebar-foot"><span class="status-dot"></span> Your private workspace<small>LaTeX &amp; Typst, side by side.</small></div>
   </aside>
   <main class="home-main" id="projectsMain">
-   <div class="home-heading"><div><div class="eyebrow">YOUR WORKSPACE</div><h1 id="homeHeading">All projects</h1><p>Your papers, notes, and next ideas.</p></div></div>
+   <div class="home-heading"><h1 id="homeHeading">All projects</h1></div>
    <section class="starter-projects" aria-label="Starter projects"><div class="starter-heading"><h2>Start with a template</h2><button id="browseTemplates" class="outline">More templates <span aria-hidden="true">→</span></button></div><div id="starterProjects" class="starter-grid"></div></section>
    <div class="home-action-row"><div class="home-heading-actions"><button id="importProject" class="outline">↥ Import ZIP</button><button id="createProjectFolder" class="outline">▱ New folder</button><button id="createProject" class="primary">＋ New project</button></div><div class="home-view-tools"><label class="project-sort">Sort by<select id="projectSort" aria-label="Sort projects"><option value="updated">Last edited</option><option value="name">Name</option></select></label><div class="view-switch" role="group" aria-label="Project view"><button id="projectGridView" class="active" aria-label="Grid view" aria-pressed="true">▦</button><button id="projectListView" aria-label="List view" aria-pressed="false">☷</button></div><button id="refreshProjects" class="icon" title="Refresh projects" aria-label="Refresh projects">↻</button></div></div>
    <div id="folderLocation" class="folder-location" hidden><div class="folder-navigation"><button id="upProjectFolder" class="outline">↑ Up one level</button><button id="rootProjectFolder" class="text-button">All projects</button></div><nav id="folderBreadcrumbs" aria-label="Project folder path"></nav><button id="manageProjectFolder" class="outline">Folder settings</button></div>
    <div class="home-tools"><label class="project-search"><span aria-hidden="true">⌕</span><input id="projectSearch" type="search" placeholder="Search projects…" aria-label="Search projects"><kbd>/</kbd></label></div>
-   <div class="project-summary"><span id="projectCount" role="status" aria-live="polite">Loading projects…</span><span id="projectViewHint">Select a project to start writing</span></div>
+   <div class="project-summary"><span id="projectCount" role="status" aria-live="polite">Loading projects…</span></div>
    <div id="projectList" class="project-browser grid-view" aria-label="Projects and folders"></div>
    <div id="projectsEmpty" class="projects-empty" hidden><span aria-hidden="true">▱</span><h2>No projects here yet.</h2><p id="projectsEmptyText">Create a project or import an existing ZIP to get started.</p><button id="emptyNewProject" class="outline">＋ New project</button></div>
-   <footer class="home-footer"><span>IDSL Editor <span aria-hidden="true">·</span> LaTeX + Typst</span><span>Your ideas have a home here.</span></footer>
   </main>
  </div>
 </div>
@@ -61,6 +58,7 @@
  <div class="editor-menu-section"><div id="assetViewOptions" class="asset-view-options" role="group" aria-label="Image view" hidden><button id="sourceTab" aria-pressed="true">Source</button><button id="assetPreviewTab" aria-pressed="false">Preview</button></div><label class="editor-menu-field">Main document<select id="mainFile" aria-label="Main document"></select></label></div>
  <div class="editor-menu-section"><div class="editor-menu-heading"><span class="preview-title">PDF preview</span><span id="buildStatus" class="build-status" aria-live="polite">Ready to compile</span></div><button id="openPdfButton">Open PDF in a new tab ↗</button><button id="logButton">Build log <span id="logBadge"></span></button><label class="editor-menu-check"><input id="autoCompile" type="checkbox">Auto-compile</label></div>
  <button id="helpButton">Keyboard shortcuts &amp; help</button>
+ <button id="editorDeleteProject" class="danger" hidden>Delete project…</button>
  <details class="editor-details"><summary>Document details</summary><div><span id="fileType">LaTeX</span><span id="roleLabel">Editor</span><span id="cursorPosition">Ln 1, Col 1</span><span id="wordCount">0 words</span><span id="connectionStatus">Connected</span><span id="workspaceLanguage" hidden></span></div></details>
 </div>
 <input id="uploadFiles" type="file" multiple hidden><input id="importZip" type="file" accept=".zip,application/zip" hidden>

@@ -104,6 +104,10 @@ dialog:has(#backupForm){width:min(760px,94vw)}#backupForm .backup-options{gap:10
 #workspace .project-label button{max-width:100%;font-size:13px}
 .active-file{font:10px var(--mono);opacity:.7;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:100%}
 #projectTitleInput{width:340px;max-width:100%;min-width:0;border:1px solid #ffffff66;border-radius:3px;background:#ffffff12;color:inherit;font-size:13px;padding:1px 4px;outline-offset:1px}
+.trash-project{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+.trash-project>div:first-child{min-width:0;overflow-wrap:anywhere}.trash-project small{display:block;color:var(--muted);margin-top:5px;font-size:11px}
+.trash-project .actions{flex:none;margin:0;gap:6px}.trash-project button{font-size:11px;padding:8px}
+@media(max-width:500px){.trash-project{align-items:flex-start;flex-direction:column}}
 #workspace .compile{padding:8px 12px}
 #workspace .workspace-icon{flex:none;color:inherit}
 #workspace .save-status.dirty::before{content:'●'}

@@ -200,7 +200,7 @@ async function navigateTypst(path,range){
  const index=position=>lines.slice(0,position?.line||0).reduce((sum,line)=>sum+line.length+1,0)+(position?.character||0);
  $('code').focus();$('code').setSelectionRange(index(range?.start),index(range?.end||range?.start));$('code').scrollTop=Math.max(0,((range?.start?.line||0)-3)*23);updateStats();
 }
-function openProject(pid,{historyMode='push'}={}){return savedNavigation(async()=>{cancelProjectRename();closeFileContextMenu();closeEditorMenu();Live.stop();const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile'])$(id).disabled=!editable();$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await readFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||false;$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();Live.open().then(enabled=>{if(S.project?.id===pid&&!enabled&&!typstProject()&&$('autoCompile').checked&&!S.project.build)scheduleCompile();});if(!S.invite)setProjectRoute('#project='+pid,historyMode);});}
+function openProject(pid,{historyMode='push'}={}){return savedNavigation(async()=>{cancelProjectRename();closeFileContextMenu();closeEditorMenu();Live.stop();const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;$('editorDeleteProject').hidden=S.project.role!=='owner';for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile'])$(id).disabled=!editable();$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await readFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||false;$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();Live.open().then(enabled=>{if(S.project?.id===pid&&!enabled&&!typstProject()&&$('autoCompile').checked&&!S.project.build)scheduleCompile();});if(!S.invite)setProjectRoute('#project='+pid,historyMode);});}
 // A fresh browsing context keeps PDF loads out of page Back/Forward history.
 // Unloading it on the home page also releases the native PDF viewer.
 function replacePdfFrame(src=null){
@@ -338,14 +338,34 @@ function renameExplorerProject(project){
  });
 }
 function deleteExplorerProject(project){
- modal('Delete project?',`<p>This permanently deletes <strong>${esc(project.name)}</strong>, including its source files, assets, and saved history, for everyone with access.</p><p class="hint">Export the source first if you need a copy. Existing GitHub backups are retained.</p><form id="deleteExplorerProjectForm"><label>Type the project name to confirm<input id="deleteProjectName" required autocomplete="off" spellcheck="false" autofocus></label><div class="actions"><button type="button" id="cancelDeleteProject" class="outline">Cancel</button><button id="confirmDeleteProject" class="primary" disabled>Delete project</button></div></form>`);
- const input=$('deleteProjectName'),button=$('confirmDeleteProject');let busy=false;
- const update=()=>{button.disabled=busy||input.value!==project.name;};input.addEventListener('input',update);input.focus();
+ modal('Move to Trash?',`<p><strong>${esc(project.name)}</strong> can be restored for 30 days.</p><form id="deleteExplorerProjectForm"><div class="actions"><button type="button" id="cancelDeleteProject" class="outline">Cancel</button><button id="confirmDeleteProject" class="primary">Move to Trash</button></div></form>`);
+ const button=$('confirmDeleteProject');let busy=false;
  action('cancelDeleteProject',closeModal);
  $('deleteExplorerProjectForm').addEventListener('submit',async event=>{
-  event.preventDefault();if(button.disabled)return;busy=true;update();
-  try{await api('/api/projects/'+project.id,'DELETE',{});await refreshProjects();closeModal();toast('Project deleted.');}catch(error){fail(error);}finally{busy=false;update();}
+  event.preventDefault();if(busy)return;busy=true;button.disabled=true;
+  try{
+   if(S.project?.id===project.id&&!await save())return;
+   await api('/api/projects/'+project.id,'DELETE',{});
+   if(S.project?.id===project.id)await projects();else await refreshProjects();closeModal();toast('Moved to Trash.');
+  }catch(error){fail(error);}finally{busy=false;button.disabled=false;}
  });
+}
+async function trashDialog(){
+ const result=await api('/api/trash');
+ modal('Trash',`<p class="hint">Projects are permanently deleted after 30 days.</p><div id="trashProjects">${result.projects.map(project=>`<div class="trash-project"><div><strong>${esc(project.name)}</strong><small>Deletes ${esc(new Date(project.expires*1000).toLocaleDateString())}</small></div><div class="actions"><button class="outline" data-restore-project="${esc(project.id)}">Restore</button><button class="outline danger" data-purge-project="${esc(project.id)}">Delete forever…</button></div></div>`).join('')||'<p>Trash is empty.</p>'}</div>`);
+ for(const project of result.projects){
+  document.querySelector(`[data-restore-project="${project.id}"]`).addEventListener('click',async event=>{
+   const button=event.currentTarget;button.disabled=true;
+   try{await api('/api/trash/'+project.id,'POST',{});await refreshProjects();await trashDialog();toast('Project restored.');}catch(error){button.disabled=false;fail(error);}
+  });
+  document.querySelector(`[data-purge-project="${project.id}"]`).addEventListener('click',()=>{
+   modal('Delete forever?',`<p>Permanently delete <strong>${esc(project.name)}</strong> and its files and history?</p><div class="actions"><button id="cancelPurgeProject" class="outline">Cancel</button><button id="purgeProject" class="primary">Delete forever</button></div>`);
+   action('cancelPurgeProject',trashDialog);action('purgeProject',async()=>{
+    const button=$('purgeProject');button.disabled=true;
+    try{await api('/api/trash/'+project.id,'DELETE',{name:project.name});await trashDialog();toast('Project permanently deleted.');}catch(error){button.disabled=false;fail(error);}
+   });
+  });
+ }
 }
 function explorerProjectActions(project){
  const menu=document.createElement('details');menu.className='project-actions';menu.dataset.projectActions=project.id;
@@ -618,6 +638,8 @@ async function finishProjectRename(){
  }catch(error){if(projectRename===edit){edit.saving=false;input.disabled=false;input.focus();}fail(error);}
 }
 action('projectTitle',beginProjectRename);
+action('editorDeleteProject',()=>{if(S.project?.role==='owner')deleteExplorerProject({...S.project});});
+action('openTrash',trashDialog);
 $('projectTitleInput').addEventListener('input',event=>event.target.setCustomValidity(''));
 $('projectTitleInput').addEventListener('blur',finishProjectRename);
 $('projectTitleInput').addEventListener('keydown',event=>{if(event.isComposing)return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancelProjectRename(true);}else if(event.key==='Enter'){event.preventDefault();finishProjectRename();}});
@@ -640,7 +662,7 @@ function accountMenu(anchor){
  item('accountProjects',projects);item('accountAppearance',appearanceDialog);if(!S.project)item('accountBackups',allBackupsDialog);if(S.project?.role==='owner')item('accountProjectBackup',backupDialog);
  if(S.canInviteLab){item('inviteLabMembers',labSignupDialog);item('approvedEmailsButton',approvedEmailsDialog);}
  if(!S.demo)item('signOut',()=>savedNavigation(async()=>{await api('/api/logout','POST',{});for(const key of Object.keys(sessionStorage))if(key.startsWith('labtex-draft:'+S.user.id+':'))sessionStorage.removeItem(key);location.href='/';}));
- if(S.project?.role==='owner')item('deleteProject',async()=>{if(prompt('Type the project name to permanently delete it:')!==S.project.name)return;await api(apiPath(),'DELETE',{});S.project=null;S.file=null;S.dirty=false;history.replaceState(null,'','/');location.reload();});
+ if(S.project?.role==='owner')item('deleteProject',()=>deleteExplorerProject({...S.project}));
  menu.hidden=false;anchor.setAttribute('aria-expanded','true');positionAccountMenu();menu.querySelector('[role=menuitem]').focus();
 }
 for(const id of ['accountButton','homeAccountButton']){const button=$(id);button.setAttribute('aria-haspopup','menu');button.setAttribute('aria-expanded','false');button.setAttribute('aria-controls','accountDropdown');action(id,()=>accountMenu(button));button.addEventListener('keydown',event=>{if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();accountMenu(button);if(event.key==='ArrowUp')$('accountDropdown').querySelector('[role=menuitem]:last-child')?.focus();}});}

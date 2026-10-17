@@ -6,6 +6,7 @@ import argparse
 import os
 from pathlib import Path
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from deploy.local import environment, ROOT
+from server import delete_project_rows
 
 
 def main():
@@ -24,7 +26,7 @@ def main():
     parser.add_argument('--editor-undo',action='store_true',help='Run source undo and redo checks on a fresh database')
     parser.add_argument('--editor-save',action='store_true',help='Run autosave and navigation checks on a fresh database')
     args=parser.parse_args()
-    scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_editor_layout.cjs', 'browser_undo.cjs', 'browser_autosave.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs', 'browser_tree.cjs', 'browser_project_folders.cjs', 'browser_templates_palettes.cjs', 'browser_project_actions.cjs', 'browser_library_layout.cjs', 'browser_file_actions.cjs', 'browser_file_creation.cjs', 'browser_drag_live.cjs')
+    scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_editor_layout.cjs', 'browser_undo.cjs', 'browser_autosave.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs', 'browser_tree.cjs', 'browser_project_folders.cjs', 'browser_templates_palettes.cjs', 'browser_project_actions.cjs', 'browser_library_layout.cjs', 'browser_file_actions.cjs', 'browser_file_creation.cjs', 'browser_trash.cjs', 'browser_drag_live.cjs')
     if args.live_typst:scripts=('browser_smoke.cjs','browser_tinymist.cjs')
     if args.backup_ui:scripts=('browser_smoke.cjs','browser_typst.cjs','browser_drag_live.cjs')
     if args.editor_undo:scripts=('browser_undo.cjs',)
@@ -47,6 +49,11 @@ def main():
             else: raise RuntimeError('Browser test server did not start: ' + log_path.read_text())
             for script in scripts:
                 subprocess.run([os.getenv('NODE_BIN', 'node'), str(ROOT / 'tests' / script)], env=env, cwd=ROOT, check=True)
+                # Retained trash counts toward project limits. Purge only deleted
+                # fixtures in this runner's disposable database between suites.
+                with sqlite3.connect(Path(folder) / 'labtex.sqlite3') as db:
+                    for (pid,) in db.execute('SELECT project_id FROM project_trash').fetchall():
+                        delete_project_rows(db,pid)
         finally:
             server.terminate()
             server.wait(timeout=10)

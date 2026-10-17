@@ -43,8 +43,8 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await page.goto(origin+'/#projects');await page.locator('.project-directory[data-folder="'+folder.id+'"]').waitFor();
   for(const viewport of [{width:1920,height:1080},{width:1440,height:900},{width:1280,height:720},{width:390,height:844}]){
    await page.setViewportSize(viewport);await page.evaluate(()=>scrollTo(0,document.documentElement.scrollHeight));
-   const layout=await page.evaluate(()=>{const footer=document.querySelector('.home-footer').getBoundingClientRect(),sidebar=document.querySelector('.home-sidebar-foot'),tiles=[...document.querySelectorAll('#projectList>.project-item,#projectList>.project-directory')].map(el=>el.getBoundingClientRect());return {gap:innerHeight-footer.bottom,footTop:footer.top,sidebarGap:getComputedStyle(sidebar).display==='none'?null:innerHeight-sidebar.getBoundingClientRect().bottom,heights:tiles.map(r=>Math.round(r.height)),widths:tiles.map(r=>Math.round(r.width)),overflow:document.documentElement.scrollWidth>innerWidth};});
-   assert.ok(layout.gap>=28,JSON.stringify({viewport,layout}));assert.ok(layout.footTop>=0);if(layout.sidebarGap!==null)assert.ok(layout.sidebarGap>=28,JSON.stringify({viewport,layout}));
+   assert.equal(await page.locator('.home-footer,.home-sidebar-foot,.home-topbar-caption').count(),0);
+   const layout=await page.evaluate(()=>{const tiles=[...document.querySelectorAll('#projectList>.project-item,#projectList>.project-directory')].map(el=>el.getBoundingClientRect());return {heights:tiles.map(r=>Math.round(r.height)),widths:tiles.map(r=>Math.round(r.width)),overflow:document.documentElement.scrollWidth>innerWidth};});
    assert.equal(layout.overflow,false);assert.equal(new Set(layout.heights).size,1,'Folder/project tiles must have equal heights');assert.ok(Math.max(...layout.widths)-Math.min(...layout.widths)<=1);
    await page.evaluate(()=>scrollTo(0,0));await page.locator('#homeAccountButton').click();
    const menu=await page.locator('#accountDropdown').boundingBox();assert.ok(menu.x>=0&&menu.x+menu.width<=viewport.width&&menu.y+menu.height<=viewport.height);
@@ -53,6 +53,6 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await openLibrary();assert.ok(await page.evaluate(()=>document.querySelector('#modalBody').scrollWidth<=document.querySelector('#modalBody').clientWidth),'Mobile template cards must fit');await page.keyboard.press('Escape');
   await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>scrollTo(0,document.documentElement.scrollHeight));await page.screenshot({path:path.join(output,'explorer-footer-tiles.png'),animations:'disabled'});
   await api('/api/projects/'+created,'DELETE',{});await api('/api/project-folders/'+folder.id,'DELETE',{});
-  assert.deepEqual(errors,[]);console.log('PASS searchable template library, explicit private copies, account dropdown keyboard/outside dismissal, equal tile sizes and unclipped footers at four viewport sizes');
+  assert.deepEqual(errors,[]);console.log('PASS searchable template library, explicit private copies, account dropdown keyboard/outside dismissal, equal tile sizes and no decorative footer text at four viewport sizes');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});
