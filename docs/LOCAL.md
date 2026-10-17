@@ -87,6 +87,8 @@ Open **My projects → New project** and choose **Typst** or **LaTeX**, then a r
 
 Choose **Dark preview** in the top bar, beside the theme toggle, to display the rendered document in dark colors. This choice is remembered separately from the interface theme and works with any palette in light or dark mode. It changes the on-screen preview only; exported PDFs and document source keep their original colors.
 
+Click the project title in the editor to rename it in place: Enter or clicking outside saves, Escape cancels. Right-click empty space in Project files for New file and Upload files. Right-click a folder name or the indentation inside it to create/upload inside that folder; paths are relative to it. The top + and upload buttons use the project root.
+
 Both formats use the same file tree, autosave, history, source ZIP export, and project-named PDF download. On Mac, editable Typst projects open the Tinymist live preview automatically. LaTeX retains manual/automatic PDF builds and clickable `file:line:column` errors in the build log. Typst PDF generation is available through **Export PDF**; it does not replace the live view.
 
 Source edits save automatically after a half-second pause, or every five seconds while you keep typing. Leaving a project or switching files waits for the latest save, including browser Back/Forward and **Account → My projects**. Switching tabs or leaving the browser window also triggers a save. A failed save or coauthor conflict keeps the editor open with your draft; temporary connection/server errors retry automatically. Check **All changes saved** before closing the tab. Unsaved drafts remain recoverable in the same browser tab, and the browser warns before leaving with pending changes.

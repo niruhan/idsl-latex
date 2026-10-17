@@ -170,13 +170,14 @@ function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toL
  function renderNode(node,parent){
   for(const file of node.files){
    const b=document.createElement('button');b.className='tree-file'+(S.file?.path===file.path?' active':'');b.title=file.path;const ext=file.path.split('.').pop();b.innerHTML=`<span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(file.path.split('/').at(-1))}</span>${file.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',()=>{loadFile(file.path).then(()=>{if(matchMedia('(max-width:700px)').matches)setSidebarCollapsed(true);}).catch(fail);});b.setAttribute('aria-haspopup','menu');b.setAttribute('aria-controls','fileContextMenu');dragProjectFile(b,file.path);
-   const contextMenu=event=>{event.preventDefault();const rect=b.getBoundingClientRect();fileMenu({path:file.path,x:event.clientX||rect.left+20,y:event.clientY||rect.bottom,anchor:b}).catch(fail);};
+   const contextMenu=event=>{event.preventDefault();event.stopPropagation();const rect=b.getBoundingClientRect();fileMenu({path:file.path,x:event.clientX||rect.left+20,y:event.clientY||rect.bottom,anchor:b}).catch(fail);};
    b.addEventListener('contextmenu',contextMenu);b.addEventListener('keydown',event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10')contextMenu(event);});parent.append(b);
   }
   for(const [name,folder] of node.folders){
    const row=document.createElement('button'),arrow=document.createElement('span'),label=document.createElement('span'),children=document.createElement('div');
    row.type='button';row.className='tree-folder';row.dataset.folder=folder.path;row.title=folder.path;dragProjectFile(row,folder.path,true);bindFileDrop(row,folder.path);arrow.setAttribute('aria-hidden','true');label.textContent=name;label.className='filename';row.append(arrow,label);
-   children.className='tree-children';children.id='file-folder-'+folderId++;row.setAttribute('aria-controls',children.id);
+   children.className='tree-children';children.dataset.folder=folder.path;children.id='file-folder-'+folderId++;row.setAttribute('aria-controls',children.id);row.setAttribute('aria-haspopup','menu');
+   row.addEventListener('keydown',event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){event.preventDefault();event.stopPropagation();directoryMenu(folder.path,{anchor:row});}});
    function expanded(value){children.hidden=!value;row.setAttribute('aria-expanded',String(value));row.setAttribute('aria-label',(value?'Collapse ':'Expand ')+folder.path);arrow.textContent=value?'▾':'▸';}
    expanded(!collapsed.has(folder.path));row.addEventListener('click',()=>{const value=children.hidden;if(value)collapsed.delete(folder.path);else collapsed.add(folder.path);if(!term)rememberFolders(state);expanded(value);});
    parent.append(row,children);renderNode(folder,children);
@@ -199,7 +200,7 @@ async function navigateTypst(path,range){
  const index=position=>lines.slice(0,position?.line||0).reduce((sum,line)=>sum+line.length+1,0)+(position?.character||0);
  $('code').focus();$('code').setSelectionRange(index(range?.start),index(range?.end||range?.start));$('code').scrollTop=Math.max(0,((range?.start?.line||0)-3)*23);updateStats();
 }
-function openProject(pid,{historyMode='push'}={}){return savedNavigation(async()=>{closeEditorMenu();Live.stop();const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile'])$(id).disabled=!editable();$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await readFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||false;$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();Live.open().then(enabled=>{if(S.project?.id===pid&&!enabled&&!typstProject()&&$('autoCompile').checked&&!S.project.build)scheduleCompile();});if(!S.invite)setProjectRoute('#project='+pid,historyMode);});}
+function openProject(pid,{historyMode='push'}={}){return savedNavigation(async()=>{cancelProjectRename();closeFileContextMenu();closeEditorMenu();Live.stop();const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile'])$(id).disabled=!editable();$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await readFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||false;$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();Live.open().then(enabled=>{if(S.project?.id===pid&&!enabled&&!typstProject()&&$('autoCompile').checked&&!S.project.build)scheduleCompile();});if(!S.invite)setProjectRoute('#project='+pid,historyMode);});}
 // A fresh browsing context keeps PDF loads out of page Back/Forward history.
 // Unloading it on the home page also releases the native PDF viewer.
 function replacePdfFrame(src=null){
@@ -236,7 +237,7 @@ async function compile({automatic=false}={}){
  }
 }
 function projects({historyMode='push',folder=Home.folder}={}){return savedNavigation(async()=>{
- closeEditorMenu();Live.stop();++navigationId;clearTimeout(autoTimer);
+ cancelProjectRename();closeFileContextMenu();closeEditorMenu();Live.stop();++navigationId;clearTimeout(autoTimer);
  S.project=null;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;replacePdfFrame();clearAssetPreview();
  $('workspace').hidden=true;$('auth').hidden=true;$('projectHome').hidden=false;
  Home.visible=true;Home.folder=folder;Home.filter='all';$('projectSearch').value='';closeModal();document.title='Projects · IDSL Editor';
@@ -432,12 +433,52 @@ async function historyDialog(target){
  }));
 }
 
-async function addFile(){if(!await save())return;modal('Add a project file','<form id="addFileForm"><label>Filename<input id="newFileName" placeholder="sections/method.tex" required></label><p>Use slashes to create folders. For example: sections/method.tex</p><div class="actions"><button class="primary">Create file</button></div></form>');$('addFileForm').addEventListener('submit',async e=>{e.preventDefault();try{const path=$('newFileName').value.trim();await api(apiPath('file'),'PUT',{path,content:'',revision:0});S.project=await api(apiPath());closeModal();await loadFile(path);}catch(e){fail(e);}});}
+function insideFolder(folder,name){
+ if(!name||name.startsWith('/')||name.includes('\\')||name.split('/').some(part=>!part||part==='.'||part==='..'))throw Error('Choose a relative filename inside this folder.');
+ return folder?folder+'/'+name:name;
+}
+async function addFile(folder='',pid=S.project?.id){
+ if(!editable()||S.project.id!==pid||!await save()||S.project?.id!==pid)return;
+ const base='/api/projects/'+pid;
+ modal('Add a project file',`<form id="addFileForm"><p class="hint">Create in <strong>${esc(folder||'Project root')}</strong></p><label>Filename<input id="newFileName" placeholder="${typstProject()?'notes.typ':'notes.tex'}" maxlength="220" required></label><p>Use slashes to create subfolders inside this folder.</p><div class="actions"><button id="createProjectFile" class="primary">Create file</button></div></form>`);
+ $('newFileName').focus();
+ $('addFileForm').addEventListener('submit',async event=>{
+  event.preventDefault();const button=$('createProjectFile');if(button.disabled)return;button.disabled=true;
+  try{
+   if(S.project?.id!==pid)throw Error('Reopen this project to create a file.');
+   const path=insideFolder(folder,$('newFileName').value.trim());await api(base+'/file','PUT',{path,content:'',revision:0});
+   if(S.project?.id!==pid)return;const project=await api(base);if(S.project?.id!==pid)return;S.project=project;closeModal();await loadFile(path);
+  }catch(error){fail(error);}finally{button.disabled=false;}
+ });
+}
+let uploadTarget=null;
+function chooseUpload(folder='',pid=S.project?.id){
+ if(!editable()||S.project.id!==pid)return;uploadTarget={folder,pid};$('uploadFiles').value='';$('uploadFiles').click();
+}
 let fileMenuTicket=0,fileMenuAnchor=null;
 function closeFileContextMenu(restoreFocus=false){
- fileMenuTicket++;const menu=$('fileContextMenu');if(!menu)return;menu.hidden=true;fileMenuAnchor?.setAttribute('aria-expanded','false');
- if(restoreFocus){const path=fileMenuAnchor?.title;[...document.querySelectorAll('.tree-file')].find(button=>button.title===path)?.focus();}
+ fileMenuTicket++;const menu=$('fileContextMenu');if(!menu)return;menu.hidden=true;if(fileMenuAnchor?.matches('.tree-file'))fileMenuAnchor.setAttribute('aria-expanded','false');
+ if(restoreFocus){const path=fileMenuAnchor?.title;(fileMenuAnchor?.isConnected?fileMenuAnchor:[...document.querySelectorAll('.tree-file,.tree-folder')].find(button=>button.title===path))?.focus();}
 }
+function positionFileMenu(options={}){
+ const menu=$('fileContextMenu');menu.hidden=false;const anchor=fileMenuAnchor?.getBoundingClientRect();
+ menu.style.left=Math.max(8,Math.min(innerWidth-menu.offsetWidth-8,options.x??anchor?.left??8))+'px';menu.style.top=Math.max(8,Math.min(innerHeight-menu.offsetHeight-8,options.y??(anchor?.bottom||3)+5))+'px';
+ (menu.querySelector('[role=menuitem]:not(:disabled)')||menu).focus();
+}
+function directoryMenu(folder='',options={}){
+ if(!S.project)return;closeFileContextMenu();closeAccountMenu();closeEditorMenu();const pid=S.project.id,menu=$('fileContextMenu'),disabled=editable()?'':'disabled';
+ fileMenuAnchor=options.anchor||$('fileTree');
+ // Folder rows use aria-expanded for their children; do not overwrite it for the menu.
+ menu.setAttribute('aria-label','Folder actions');menu.innerHTML=`<div class="file-menu-heading">${esc(folder||'Project root')}</div><button id="directoryNewFile" role="menuitem" ${disabled}>New file…</button><button id="directoryUpload" role="menuitem" ${disabled}>Upload files…</button>`;
+ action('directoryNewFile',()=>{closeFileContextMenu();return addFile(folder,pid);});action('directoryUpload',()=>{closeFileContextMenu();chooseUpload(folder,pid);});positionFileMenu(options);
+}
+$('fileTree').tabIndex=0;$('fileContextMenu').tabIndex=-1;
+$('projectFiles').addEventListener('contextmenu',event=>{
+ if(event.target.closest('input,textarea'))return;event.preventDefault();event.stopPropagation();
+ const container=event.target.closest('.tree-folder,.tree-children'),folder=container?.dataset.folder||'';
+ directoryMenu(folder,{anchor:container?.classList.contains('tree-folder')?container:$('fileTree'),x:event.clientX,y:event.clientY});
+});
+$('fileTree').addEventListener('keydown',event=>{if(event.target===$('fileTree')&&(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10')){event.preventDefault();directoryMenu();}});
 async function refreshAfterFileChange(pid,path,{reload=false}={}){
  if(S.project?.id!==pid)return;const project=await api('/api/projects/'+pid);if(S.project?.id!==pid)return;
  S.project=project;const selected=path||S.file?.path,next=project.files.some(file=>file.path===selected)?selected:project.main;
@@ -462,16 +503,16 @@ async function fileMenu(options={}){
  // Read the menu's target without navigating away from the open editor.
  const file=S.file?.path===path?{...S.file,content:S.file.content===null?null:S.text}:await api('/api/projects/'+pid+'/file?path='+encodeURIComponent(path));
  if(ticket!==fileMenuTicket||S.project?.id!==pid)return;
- const target={...file,pid},menu=$('fileContextMenu');fileMenuAnchor=options.anchor||document.querySelector('.tree-file.active');fileMenuAnchor?.setAttribute('aria-expanded','true');
+ const target={...file,pid},menu=$('fileContextMenu');menu.setAttribute('aria-label','File actions');fileMenuAnchor=options.anchor||document.querySelector('.tree-file.active');fileMenuAnchor?.setAttribute('aria-expanded','true');
  menu.innerHTML=`<div class="file-menu-heading">${esc(path)}</div><button id="downloadFile" role="menuitem">Download</button><button id="historyButton" role="menuitem" ${target.content===null?'disabled title="History is available for text files."':''}>File history</button>${editable()?'<button id="renameFile" role="menuitem">Rename…</button><button id="replaceFile" role="menuitem">Replace…</button><hr><button id="deleteFile" class="danger" role="menuitem" '+(path===S.project.main?'disabled title="Choose another main document before deleting this file."':'')+'>Delete…</button>':''}`;
  const item=(id,fn)=>action(id,()=>{closeFileContextMenu();return fn(target);});
  item('downloadFile',()=>download(target.content===null?Uint8Array.from(atob(target.base64),value=>value.charCodeAt(0)):target.content,path.split('/').pop(),'application/octet-stream'));
  item('historyButton',historyDialog);
  if(editable()){item('renameFile',renameProjectFile);item('replaceFile',replaceProjectFile);item('deleteFile',deleteProjectFile);}
- menu.hidden=false;const anchor=fileMenuAnchor?.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(innerWidth-menu.offsetWidth-8,options.x??anchor?.left??8))+'px';menu.style.top=Math.max(8,Math.min(innerHeight-menu.offsetHeight-8,options.y??(anchor?.bottom||3)+5))+'px';menu.querySelector('[role=menuitem]').focus();
+ positionFileMenu(options);
 }
 document.addEventListener('click',event=>{if(!event.target.closest('#fileContextMenu'))closeFileContextMenu();});
-document.addEventListener('keydown',event=>{const menu=$('fileContextMenu');if(menu.hidden)return;if(event.key==='Escape'||event.key==='Tab'){closeFileContextMenu(true);if(event.key==='Escape')event.preventDefault();return;}if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;event.preventDefault();const items=[...menu.querySelectorAll('[role=menuitem]:not(:disabled)')],index=items.indexOf(document.activeElement);items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();});
+document.addEventListener('keydown',event=>{const menu=$('fileContextMenu');if(menu.hidden)return;if(event.key==='Escape'||event.key==='Tab'){closeFileContextMenu(true);if(event.key==='Escape')event.preventDefault();return;}if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;event.preventDefault();const items=[...menu.querySelectorAll('[role=menuitem]:not(:disabled)')],index=items.indexOf(document.activeElement);if(items.length)items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();});
 window.addEventListener('resize',()=>closeFileContextMenu());window.addEventListener('scroll',()=>closeFileContextMenu(),{passive:true});
 
 async function approvedEmailsDialog(){
@@ -558,9 +599,28 @@ document.addEventListener('keydown',event=>{
  if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='b'){event.preventDefault();if(!sidebarCollapsed&&$('projectFiles').contains(document.activeElement))$('sidebarToggle').focus();setSidebarCollapsed(!sidebarCollapsed);}
  if(event.key==='Escape'&&!event.defaultPrevented){if(!$('editorMenu').hidden){event.preventDefault();closeEditorMenu(true);}else if(!sidebarCollapsed&&matchMedia('(max-width:700px)').matches){event.preventDefault();setSidebarCollapsed(true);$('sidebarToggle').focus();}}
 });
-action('closeModal',closeModal);action('projectsButton',projects);action('projectsNavButton',projects);action('sourceTab',()=>{editorMode('source');$('code').focus();});action('assetPreviewTab',()=>editorMode('preview'));action('compileButton',compile);action('firstCompileButton',compile);action('shareButton',share);action('backupButton',backupDialog);action('newFileButton',addFile);action('uploadButton',()=>$('uploadFiles').click());
+action('closeModal',closeModal);action('projectsButton',projects);action('projectsNavButton',projects);action('sourceTab',()=>{editorMode('source');$('code').focus();});action('assetPreviewTab',()=>editorMode('preview'));action('compileButton',compile);action('firstCompileButton',compile);action('shareButton',share);action('backupButton',backupDialog);action('newFileButton',addFile);action('uploadButton',chooseUpload);
 action('downloadButton',async()=>{const pid=S.project?.id;if(typstProject()&&editable()&&!await compile())return;if(S.project?.id===pid&&S.project?.build?.success)downloadUrl(apiPath('pdf')+'?download=1');});action('openPdfButton',()=>{if(S.project?.build?.success)window.open(apiPath('pdf'),'_blank','noopener');});action('exportSourceButton',async()=>{const pid=S.project?.id;if(await save()&&S.project?.id===pid)downloadUrl(apiPath('source.zip'));});action('logButton',async()=>{$('logPanel').hidden=!$('logPanel').hidden;if(!$('logPanel').hidden&&S.project?.build){const log=await api(apiPath('log'));$('buildLog').textContent=log.log;renderDiagnostics(log.log);}});action('closeLog',()=>$('logPanel').hidden=true);
-action('projectTitle',async()=>{if(!editable())return;const name=prompt('Project name',S.project.name);if(!name||name===S.project.name)return;await api(apiPath(),'PUT',{name});S.project=await api(apiPath());$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';});
+let projectRename=null;
+function cancelProjectRename(focus=false){projectRename=null;$('projectTitleInput').hidden=true;$('projectTitleInput').disabled=false;$('projectTitle').hidden=false;if(focus)$('projectTitle').focus();}
+function beginProjectRename(){
+ if(!editable()||projectRename)return;closeAccountMenu();closeEditorMenu();closeFileContextMenu();projectRename={pid:S.project.id,name:S.project.name,saving:false};
+ const input=$('projectTitleInput');input.value=S.project.name;input.setCustomValidity('');input.hidden=false;$('projectTitle').hidden=true;input.focus();input.select();
+}
+async function finishProjectRename(){
+ const edit=projectRename,input=$('projectTitleInput');if(!edit||edit.saving)return;const name=input.value.trim();
+ if(!name){input.setCustomValidity('Enter a project name.');input.reportValidity();input.focus();return;}
+ if(name===edit.name){cancelProjectRename();return;}edit.saving=true;input.disabled=true;
+ try{
+  await api('/api/projects/'+edit.pid,'PUT',{name});
+  if(S.project?.id===edit.pid){S.project.name=name;$('projectTitle').textContent=name;document.title=name+' · IDSL Editor';}
+  if(projectRename===edit)cancelProjectRename();
+ }catch(error){if(projectRename===edit){edit.saving=false;input.disabled=false;input.focus();}fail(error);}
+}
+action('projectTitle',beginProjectRename);
+$('projectTitleInput').addEventListener('input',event=>event.target.setCustomValidity(''));
+$('projectTitleInput').addEventListener('blur',finishProjectRename);
+$('projectTitleInput').addEventListener('keydown',event=>{if(event.isComposing)return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancelProjectRename(true);}else if(event.key==='Enter'){event.preventDefault();finishProjectRename();}});
 let accountAnchor=null;
 function closeAccountMenu(restoreFocus=false){
  const menu=$('accountDropdown');if(!menu)return;menu.hidden=true;
@@ -614,7 +674,20 @@ editorPane.addEventListener('keydown',event=>{
 },true);
 $('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener('input',()=>setText($('code').value));$('code').addEventListener('scroll',syncScroll);$('code').addEventListener('click',updateStats);$('code').addEventListener('keyup',updateStats);$('code').addEventListener('keydown',e=>{if(e.key==='Tab'&&editable()){e.preventDefault();const area=e.target,before=editSelection();area.setRangeText('  ',area.selectionStart,area.selectionEnd,'end');setText(area.value,false,{before,kind:'tab'});}});$('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();Live.open().then(enabled=>{if(!enabled&&$('autoCompile').checked)scheduleCompile();});}catch(e){fail(e);}});
 $('autoCompile').addEventListener('change',()=>{localStorage.setItem('labtex-auto:'+S.project.id,String($('autoCompile').checked));clearTimeout(autoTimer);if($('autoCompile').checked)compile().catch(fail);});
-$('uploadFiles').addEventListener('change',async e=>{try{if(!await save())return;let last;for(const file of e.target.files){if(file.size>8*1024*1024)throw Error(file.name+' exceeds 8 MB.');const exists=S.project.files.find(x=>x.path===file.name);if(exists&&!confirm('Replace '+file.name+'?'))continue;await api(apiPath('file'),'PUT',{path:file.name,base64:await base64File(file),revision:exists?.revision||0});last=file.name;}S.project=await api(apiPath());renderFiles();if(last)await loadFile(last,true);toast('Files uploaded.');}catch(e){fail(e);}finally{e.target.value='';}});
+$('uploadFiles').addEventListener('cancel',()=>{uploadTarget=null;});
+$('uploadFiles').addEventListener('change',async event=>{
+ const target=uploadTarget||{pid:S.project?.id,folder:''},files=[...event.target.files];uploadTarget=null;
+ try{
+  if(!files.length||S.project?.id!==target.pid||!editable()||!await save()||S.project?.id!==target.pid)return;
+  const base='/api/projects/'+target.pid;let project=await api(base),last;
+  for(const file of files){
+   if(S.project?.id!==target.pid)return;if(file.size>8*1024*1024)throw Error(file.name+' exceeds 8 MB.');
+   const path=insideFolder(target.folder,file.name),exists=project.files.find(item=>item.path===path);if(exists&&!confirm('Replace '+path+'?'))continue;
+   await api(base+'/file','PUT',{path,base64:await base64File(file),revision:exists?.revision||0});last=path;project=await api(base);
+  }
+  if(S.project?.id!==target.pid)return;S.project=project;renderFiles();if(last)await loadFile(last);toast('Files uploaded.');
+ }catch(error){fail(error);}finally{event.target.value='';}
+});
 $('importZip').addEventListener('change',async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>40*1024*1024)throw Error('ZIP exceeds 40 MB.');toast('Importing project…');const r=await api('/api/projects','POST',{name:file.name.replace(/\.zip$/i,''),zip:await base64File(file),folder:Home.folder});await openProject(r.id);toast('Project imported. Check the main document, then compile.');}catch(e){fail(e);}finally{e.target.value='';}});
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save().catch(fail);}if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();compile().catch(fail);}});
 window.addEventListener('blur',flushAutosave);

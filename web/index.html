@@ -39,7 +39,7 @@
  <header class="topbar">
   <button id="projectsButton" class="brand" title="All projects"><span class="mark" aria-hidden="true">I<span>τ</span></span> IDSL Editor</button>
   <button id="projectsNavButton" class="outline" title="Create, import, or open a project">My projects</button>
-  <div class="project-label"><button id="projectTitle" title="Rename project">Select a project</button><span id="filePath" class="active-file">main.tex</span></div>
+  <div class="project-label"><button id="projectTitle" title="Rename project">Select a project</button><input id="projectTitleInput" aria-label="Project name" title="Enter to save, Escape to cancel" maxlength="120" hidden><span id="filePath" class="active-file">main.tex</span></div>
   <div class="top-spacer"></div><span id="saveStatus" class="save-status" aria-live="polite">All changes saved</span>
   <button id="downloadButton" class="top-action" title="Export PDF" aria-label="Export PDF">↓ <span>Export PDF</span></button>
   <button id="compileButton" class="compile" title="Compile document (Ctrl/Cmd+Enter)" aria-label="Compile document">▶ <span>Compile</span><kbd>⌘ ↵</kbd></button>

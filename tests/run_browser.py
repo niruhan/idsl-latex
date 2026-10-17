@@ -24,7 +24,7 @@ def main():
     parser.add_argument('--editor-undo',action='store_true',help='Run source undo and redo checks on a fresh database')
     parser.add_argument('--editor-save',action='store_true',help='Run autosave and navigation checks on a fresh database')
     args=parser.parse_args()
-    scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_editor_layout.cjs', 'browser_undo.cjs', 'browser_autosave.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs', 'browser_tree.cjs', 'browser_project_folders.cjs', 'browser_templates_palettes.cjs', 'browser_project_actions.cjs', 'browser_library_layout.cjs', 'browser_file_actions.cjs', 'browser_drag_live.cjs')
+    scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_editor_layout.cjs', 'browser_undo.cjs', 'browser_autosave.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs', 'browser_tree.cjs', 'browser_project_folders.cjs', 'browser_templates_palettes.cjs', 'browser_project_actions.cjs', 'browser_library_layout.cjs', 'browser_file_actions.cjs', 'browser_file_creation.cjs', 'browser_drag_live.cjs')
     if args.live_typst:scripts=('browser_smoke.cjs','browser_tinymist.cjs')
     if args.backup_ui:scripts=('browser_smoke.cjs','browser_typst.cjs','browser_drag_live.cjs')
     if args.editor_undo:scripts=('browser_undo.cjs',)

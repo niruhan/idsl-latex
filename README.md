@@ -18,7 +18,7 @@ All screenshots use a temporary database, fictional demo accounts, and starter d
 
 - **Project explorer:** organize projects into nested folders; use **⋯** to download a project's source ZIP, rename, move, or delete it, or drag it onto a folder. Cards/list, search, sorting, and format/ownership filters help you find documents. **My projects** saves and returns home.
 - **Focused workspace:** full-height source and preview, a collapsible file explorer (**Ctrl/Cmd+B**), and a compact **Project ⋯** menu for secondary controls.
-- **LaTeX + Typst:** source editing, multi-file projects with collapsible folders, image previews (including SVG), right-click file actions, figures, and bibliographies.
+- **LaTeX + Typst:** source editing, multi-file projects with collapsible folders, image previews (including SVG), right-click file actions, figures, and bibliographies. Right-click a folder or empty space to create or upload files there; click the editor’s project title to rename it in place.
 - **Live Typst on Mac:** Tinymist keeps an incremental compiler running, streams preview updates while typing, and provides autocomplete, documentation, go-to-definition, formatting, diagnostics, and source/preview navigation.
 - **PDF preview + export:** manual PDF compilation and automatic LaTeX builds, clickable errors, project-named PDF/ZIP downloads, and an independent **Dark PDF** preview toggle.
 - **Sharing:** invite coauthors to individual projects with editor or view-only access.

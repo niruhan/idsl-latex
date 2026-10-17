@@ -103,6 +103,7 @@ dialog:has(#backupForm){width:min(760px,94vw)}#backupForm .backup-options{gap:10
 #workspace .project-label{min-width:0;gap:3px;max-width:420px}
 #workspace .project-label button{max-width:100%;font-size:13px}
 .active-file{font:10px var(--mono);opacity:.7;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:100%}
+#projectTitleInput{width:340px;max-width:100%;min-width:0;border:1px solid #ffffff66;border-radius:3px;background:#ffffff12;color:inherit;font-size:13px;padding:1px 4px;outline-offset:1px}
 #workspace .compile{padding:8px 12px}
 #workspace .workspace-icon{flex:none;color:inherit}
 #workspace .save-status.dirty::before{content:'●'}
@@ -136,6 +137,7 @@ dialog:has(#backupForm){width:min(760px,94vw)}#backupForm .backup-options{gap:10
  #workspace .topbar .project-label{display:flex;flex:1;min-width:0}
  #workspace .project-label button{font-size:11px;max-width:100%}
  #workspace .active-file{font-size:9px}
+ #workspace #projectTitleInput{width:100%;font-size:11px}
  #workspace #projectsNavButton{font-size:0;width:28px;padding:0;border:0}
  #workspace #projectsNavButton::before{content:'‹';font-size:27px}
  #workspace .top-spacer{display:none}

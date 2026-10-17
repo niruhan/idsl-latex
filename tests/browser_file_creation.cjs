@@ -1,0 +1,47 @@
+// Folder-aware creation and inline naming on a disposable fictional workspace.
+const assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+(async()=>{
+ const origin=process.env.TEST_ORIGIN;assert.ok(origin);
+ const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_BIN});
+ const context=await browser.newContext({viewport:{width:1440,height:900}}),page=await context.newPage(),errors=[],dialogs=[];
+ page.setDefaultTimeout(15000);page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>{dialogs.push(dialog.message());dialog.dismiss();});
+ async function api(route,method='GET',data){const response=await context.request.fetch(origin+route,{method,headers:{Origin:origin},data});assert.ok(response.ok(),await response.text());return response.json();}
+ const file=path=>page.locator('.tree-file').filter({has:page.locator('.filename')}).and(page.locator('[title='+JSON.stringify(path)+']'));
+ const folder=path=>page.locator('.tree-folder[data-folder='+JSON.stringify(path)+']');
+ async function ready(){await page.waitForFunction(()=>!document.querySelector('#workspace').hidden&&!document.querySelector('#workspace').inert);}
+ async function create(name){await page.locator('#directoryNewFile').click();await page.locator('#newFileName').fill(name);await page.locator('#createProjectFile').click();}
+ async function rootMenu(){await page.locator('#fileTree').click({button:'right',position:{x:180,y:(await page.locator('#fileTree').boundingBox()).height-8}});await page.locator('#directoryNewFile').waitFor();}
+ let pid;
+ try{
+  await page.goto(origin);await page.locator('input[name=email]').fill('browser-owner@example.test');await page.locator('input[name=password]').fill('browser-test-password-only');await page.locator('#authSubmit').click();await page.locator('#projectHome').waitFor({state:'visible'});
+  pid=(await api('/api/projects','POST',{name:'Folder creation fixture',format:'typst',template:false})).id;const base='/api/projects/'+pid;
+  await api(base+'/file','PUT',{path:'sections/nested/existing.typ',content:'= Existing nested source',revision:0});
+  await page.goto(origin+'/#project='+pid);await ready();
+  const original=await page.locator('#code').inputValue(),draft=original+'\n// Preserve this draft.\n';await page.locator('#code').fill(draft);await page.locator('#code').evaluate(el=>el.setSelectionRange(2,7));
+  const snapshot=()=>page.evaluate(()=>({path:document.querySelector('#filePath').textContent,text:document.querySelector('#code').value,start:document.querySelector('#code').selectionStart,end:document.querySelector('#code').selectionEnd}));const before=await snapshot();
+  // A name edits in place, without a browser dialog or disturbing the source.
+  await page.locator('#projectTitle').click();await page.locator('#projectTitleInput').fill('Discard this name');await page.locator('#projectTitleInput').press('Escape');assert.equal((await api(base)).name,'Folder creation fixture');
+  await page.locator('#projectTitle').click();await page.locator('#projectTitleInput').fill('Renamed folder fixture');await page.locator('#projectTitleInput').press('Enter');await page.locator('#projectTitle').getByText('Renamed folder fixture',{exact:true}).waitFor();assert.equal((await api(base)).name,'Renamed folder fixture');
+  await page.locator('#projectTitle').click();await page.locator('#projectTitleInput').fill('  Folder creation fixture  ');await page.locator('#filePath').click();await page.locator('#projectTitle').getByText('Folder creation fixture',{exact:true}).waitFor();assert.equal((await api(base)).name,'Folder creation fixture');assert.deepEqual(await snapshot(),before);assert.deepEqual(dialogs,[]);
+  await folder('sections/nested').click({button:'right'});await page.locator('#directoryNewFile').waitFor();assert.equal(await page.locator('#fileContextMenu .file-menu-heading').textContent(),'sections/nested');assert.equal(await folder('sections/nested').getAttribute('aria-expanded'),'true');assert.deepEqual(await snapshot(),before);
+  await page.keyboard.press('Escape');assert.equal(await folder('sections/nested').getAttribute('aria-expanded'),'true');await page.locator('#code').press('Control+z');assert.equal(await page.locator('#code').inputValue(),original);await page.locator('#code').press('Control+Shift+z');assert.equal(await page.locator('#code').inputValue(),draft);
+  // Right-click the indentation inside a nested folder, rather than its label.
+  await page.locator('.tree-children[data-folder="sections/nested"]').click({button:'right',position:{x:2,y:10}});await page.locator('#directoryNewFile').waitFor();assert.equal(await page.locator('#fileContextMenu .file-menu-heading').textContent(),'sections/nested');
+  await create('../escape.typ');await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('relative filename'));assert.equal(await page.locator('#addFileForm').isVisible(),true);await page.locator('#newFileName').fill('new.typ');await page.locator('#createProjectFile').click();await file('sections/nested/new.typ').waitFor();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='sections/nested/new.typ');
+  assert.equal((await api(base+'/file?path=main.typ')).content,draft);assert.equal((await api(base+'/file?path=sections/nested/new.typ')).content,'');assert.equal((await context.request.get(origin+base+'/file?path=new.typ')).status(),404);
+  // Upload into a collapsed folder, with no automatic expand/open on right-click.
+  await folder('sections/nested').click();await folder('sections/nested').press('Shift+F10');await page.locator('#directoryUpload').waitFor();assert.equal(await folder('sections/nested').getAttribute('aria-expanded'),'false');
+  const chooser=page.waitForEvent('filechooser');await page.locator('#directoryUpload').click();await (await chooser).setFiles({name:'uploaded.typ',mimeType:'text/plain',buffer:Buffer.from('= Uploaded in nested folder')});await file('sections/nested/uploaded.typ').waitFor();assert.equal((await api(base+'/file?path=sections/nested/uploaded.typ')).content,'= Uploaded in nested folder');assert.equal((await context.request.get(origin+base+'/file?path=uploaded.typ')).status(),404);
+  // Existing names are checked at their full destination, and cancel preserves content.
+  await folder('sections/nested').click({button:'right'});const collisionChooser=page.waitForEvent('filechooser');await page.locator('#directoryUpload').click();await (await collisionChooser).setFiles({name:'existing.typ',mimeType:'text/plain',buffer:Buffer.from('Should not overwrite')});await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Files uploaded.');await page.waitForTimeout(150);assert.equal((await api(base+'/file?path=sections/nested/existing.typ')).content,'= Existing nested source');assert.deepEqual(dialogs,['Replace sections/nested/existing.typ?']);
+  await rootMenu();assert.equal(await page.locator('#fileContextMenu .file-menu-heading').textContent(),'Project root');await create('root.typ');await file('root.typ').waitFor();assert.equal((await api(base+'/file?path=root.typ')).content,'');
+  // The ordinary upload button always targets root after a folder upload.
+  const rootChooser=page.waitForEvent('filechooser');await page.locator('#uploadButton').click();await (await rootChooser).setFiles({name:'root-upload.typ',mimeType:'text/plain',buffer:Buffer.from('Root upload')});await file('root-upload.typ').waitFor();assert.equal((await api(base+'/file?path=root-upload.typ')).content,'Root upload');
+  await page.locator('#fileTree').focus();await page.keyboard.press('Shift+F10');await page.locator('#directoryNewFile').waitFor();await page.locator('#filePath').click();assert.equal(await page.locator('#fileContextMenu').isHidden(),true);
+  // Permissions are visible in both entry points and enforced by the server.
+  const invite=await api(base+'/invite','POST',{role:'viewer'}),viewerContext=await browser.newContext(),viewer=await viewerContext.newPage();await viewer.goto(origin);await viewer.locator('input[name=email]').fill('browser-viewer@example.test');await viewer.locator('input[name=password]').fill('viewer-test-password-only');await viewer.locator('#authSubmit').click();await viewer.locator('#projectHome').waitFor({state:'visible'});await viewer.goto(invite.url);await viewer.locator('#workspace').waitFor({state:'visible'});await viewer.locator('#projectTitle').click();assert.equal(await viewer.locator('#projectTitleInput').isHidden(),true);await viewer.locator('.tree-folder[data-folder="sections/nested"]').click({button:'right'});await viewer.locator('#directoryNewFile').waitFor();assert.equal(await viewer.locator('#directoryNewFile').isDisabled(),true);assert.equal(await viewer.locator('#directoryUpload').isDisabled(),true);await viewer.keyboard.press('ArrowDown');await viewer.keyboard.press('Escape');await viewerContext.close();
+  assert.deepEqual(errors,[]);await api(base,'DELETE',{});pid=null;
+  console.log('PASS inline project rename, nested and root context creation/uploads, traversal rejection, collisions, draft/selection/undo preservation, folder keyboard controls and viewer permissions');
+ }finally{if(pid)await api('/api/projects/'+pid,'DELETE',{}).catch(()=>{});await browser.close();}
+})().catch(error=>{console.error(error);process.exit(1);});
