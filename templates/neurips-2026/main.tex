@@ -1,0 +1,53 @@
+\documentclass{article}
+% Anonymous Main Track submission. Use [preprint] for a public draft;
+% use [main,final] only for an accepted camera-ready paper.
+\usepackage{neurips_2026}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+
+\title{Your Research Paper}
+\author{Your Name \\ Your Institution \\ \texttt{author@example.test}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Describe the question, your approach, the main result, and its significance.
+Replace this example text with a single-paragraph abstract for your paper.
+\end{abstract}
+
+\input{sections/introduction}
+
+\section{Method}
+Define your assumptions and notation before presenting the approach. For example,
+\begin{equation}
+  \mathcal{L}(\theta) = \mathbb{E}_{(x,y)}\left[\|f_\theta(x)-y\|^2\right].
+\end{equation}
+
+\section{Experiments}
+Describe the data, baselines, evaluation procedure, and uncertainty in the results.
+
+\section{Limitations and conclusion}
+Summarize the findings, scope, limitations, and open questions.
+
+\begin{ack}
+Add acknowledgments and funding disclosures for the final version here.
+The style hides this section during anonymous review.
+\end{ack}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\section{Additional details}
+Add proofs, implementation details, and supplemental results here.
+
+% Complete every TODO in the official checklist for your actual submission.
+\input{checklist}
+\end{document}

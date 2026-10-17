@@ -10,20 +10,21 @@ A local workspace for writing LaTeX and Typst, with a project explorer, visual/s
 | --- | --- |
 | [![Project explorer with LaTeX and Typst documents](docs/images/projects.png)](docs/images/projects.png) | [![Dark Typst editor](docs/images/dark-theme.png)](docs/images/dark-theme.png) |
 
-More views: [LaTeX](docs/images/workspace.png) · [Visual editor](docs/images/visual-editor.png) · [Project list](docs/images/projects-list.png) · [Mobile](docs/images/projects-mobile.png) · [Sharing](docs/images/sharing.png) · [GitHub backups](docs/images/github-backups.png).
+More views: [LaTeX](docs/images/workspace.png) · [Visual editor](docs/images/visual-editor.png) · [Themes](docs/images/themes.png) · [Western slides](docs/images/western-presentation.png) · [NeurIPS paper](docs/images/neurips-paper.png) · [Project list](docs/images/projects-list.png) · [Mobile](docs/images/projects-mobile.png) · [Sharing](docs/images/sharing.png) · [GitHub backups](docs/images/github-backups.png).
 
 All screenshots use a temporary database, fictional demo accounts, and starter documents. They contain no real projects, credentials, or usable invitation links.
 
 ## Features
 
-- **Project explorer:** cards or list, search, sorting, and filters for format and ownership. Click a project to edit; **My projects** saves and returns home.
+- **Project explorer:** organize projects into nested folders; move them with the arrow button or drag and drop. Cards/list, search, sorting, and format/ownership filters help you find documents. **My projects** saves and returns home.
 - **LaTeX + Typst:** source and basic visual editing, multi-file projects with collapsible folders, figures, and bibliographies.
 - **PDF preview:** manual or automatic compilation, clickable error locations, and PDF download.
 - **Sharing:** invite coauthors to individual projects with editor or view-only access.
 - **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.
 - **GitHub backups:** keep all projects in one repository or use a separate repository per document; optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
 - **Import/export:** import project ZIPs (including Overleaf exports), upload assets, and download complete source ZIPs.
-- **Themes:** switch light/dark with one click on the sun/moon button; **Account → Appearance** also offers **System**.
+- **Themes:** choose IDSL Forest, Western Purple, Catppuccin, Dracula, or Solarized from **Themes**; switch light/dark with one click on the sun/moon button.
+- **Ready-to-use templates:** start a private copy of the Western Typst presentation or NeurIPS 2026 LaTeX paper, including its official style and checklist.
 
 Visual mode supports basic headings, paragraphs, emphasis, and Typst lists. Advanced equations/templates remain editable in source cards. The Typst sample belongs to your account; repeat visits preserve edits and avoid duplicates.
 
@@ -41,7 +42,7 @@ cd idsl-latex
 
 1. Open **[http://127.0.0.1:8765](http://127.0.0.1:8765)**.
 2. Use the printed setup token to create your account and choose a password.
-3. Click **Open sample** to try Typst, or **New project** to start your own document.
+3. Click **Open sample**, choose a starter under **Start with a template**, or use **New project**.
 
 Setup installs and checks both compilers inside this checkout. No Docker, Node.js, or full TeX installation is required. The first setup/build needs internet access.
 

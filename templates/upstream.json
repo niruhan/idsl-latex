@@ -1,0 +1,37 @@
+{
+  "touying": {
+    "version": "0.5.3",
+    "source": "https://packages.typst.org/preview/touying-0.5.3.tar.gz",
+    "archive_sha256": "cc865c954e5daa2e1c1eec7b17bfe8aa8da751d059826fb4471416e4a51852f1",
+    "files": {
+      "LICENSE": "b05f86d5330d087e655db6ffe31c8bc26f24a20840e5de22bdc919c078f8208e",
+      "lib.typ": "8526bc788c696ab61afa2300a7eb86f6134b8c9ef2f6119fcf0a29ba6ec6ed5b",
+      "src/components.typ": "55c52e3ff9ae1573ae8799ff2eafae9d137b907bd0da530673f6bef37b350752",
+      "src/configs.typ": "0a31e3fc89866d5ac7377d6db42c7098754026a293f649359460c885a590ebd7",
+      "src/core.typ": "8711fe314d4b746c841fbad9b31fb1d74de7e3ae48c8aed7bb55995cf34a255e",
+      "src/exports.typ": "30eb10c418de547d0a1a4a42563822c5190b410035a31c86a37ec28fb3cb66d4",
+      "src/magic.typ": "d1d994da1efd5cc0d809b6e241714610562c313751c6b00278b8e6d46a71d95e",
+      "src/pdfpc.typ": "c7d31da073ea0ca9da02f85749c5fd1a6ce7c1e61da23b4c186a9f8d532c3246",
+      "src/slides.typ": "e0e3e7f0311b8711352bedee3022bd434f55098fb682c678b22941904485cf8d",
+      "src/utils.typ": "bf9ce3e72d985231a486549288ed41b05fff1774b8b940f8e41f08dd31f3f79c",
+      "themes/aqua.typ": "15e6e118e8ca98878df38d190afcaa3169a95b8a247c8c938a87231fdaa7d3c8",
+      "themes/default.typ": "be9103cb14020643c1a607c5d778a34d24be3ef4187c1131a7b6db6bb6756e2d",
+      "themes/dewdrop.typ": "55912d8b43c43d78d7d1fa9abdacbad4b99e287026d18aa82346f67eaa5017ad",
+      "themes/metropolis.typ": "e2913a34b3805424ef4dcdebc51fbf836ea3efebbf69b81b09a649660cb610e5",
+      "themes/simple.typ": "b310781c17ac0ec6650d26af9ae9f96f41b963f8efb4abdced015b586123e156",
+      "themes/stargazer.typ": "bc27f0ba066a3fdc9968be77db1aa942065a69cc020a103acac9b03cf3308365",
+      "themes/themes.typ": "8d1fa8f0911cdba4973b99d7490dd8c5da01a513426fb3f726e807d175c0dc69",
+      "themes/university.typ": "9542ed8b312e87bf29faa662638803707f4d55e32e63e8c36d62263f7e94e935",
+      "typst.toml": "7095913248b421b14f258f99ee5f792c65097f5d0a46e5a5ac8c77c5d616253a"
+    }
+  },
+  "neurips": {
+    "version": "2026",
+    "source": "https://media.neurips.cc/Conferences/NeurIPS2026/Formatting_Instructions_For_NeurIPS_2026.zip",
+    "archive_sha256": "82473931e3ef710fcd3f4a8cd4119b9de32e56825f90f9e5a6d55f2d01b817d9",
+    "files": {
+      "neurips_2026.sty": "c3fc2894e83d2517ca18b66741d6c595986d97957dc08ec08bb2125a7ec4555a",
+      "checklist.tex": "780ba13c480f652dcc42e69ed61a752ce0ea270f15d332d4a45b059dabad84f6"
+    }
+  }
+}

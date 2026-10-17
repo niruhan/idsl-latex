@@ -22,6 +22,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await api('/api/projects','POST',{name:'Research notes',format:'typst',template:false});
   await api('/api/projects','POST',{name:'Literature review',format:'latex',template:false});
   await page.locator('#refreshProjects').click();await page.waitForFunction(()=>document.querySelectorAll('.project-entry').length===4);await capture('projects.png');
+  await page.locator('#homePaletteButton').click();await page.locator('[data-palette-choice=western]').click();await capture('themes.png');await page.locator('[data-palette-choice=forest]').click();await page.locator('#closeAppearance').click();
   await page.locator('#projectListView').click();await capture('projects-list.png');await page.locator('#projectGridView').click();
   // A fresh, tall viewport avoids full-page stitching artifacts after resizing.
   const mobile=await context.newPage();mobile.on('pageerror',e=>errors.push(e.message));
@@ -43,6 +44,11 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const joined=await member.request.post(origin+'/api/join',{headers:{Origin:origin},data:{token:share.url.split('#invite=')[1]}});assert.equal(joined.ok(),true);await member.close();
   await page.locator('#shareButton').click();await page.locator('.member-row').filter({hasText:'Demo Coauthor'}).waitFor();assert.equal(await page.locator('#inviteUrl').count(),0);await capture('sharing.png');await page.locator('#closeModal').click();
   await page.locator('#backupButton').click();await page.locator('#backupSharedRepo').fill('example/research-documents');assert.equal(await page.locator('#backupToken').inputValue(),'');await capture('github-backups.png');
+  await page.locator('#closeModal').click();await page.locator('#projectsNavButton').click();await page.locator('[data-starter=western-presentation]').waitFor();
+  await page.locator('#homePaletteButton').click();await page.locator('[data-palette-choice=western]').click();await page.locator('#closeAppearance').click();
+  await page.locator('[data-starter=western-presentation]').click();await page.locator('#workspace').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));await capture('western-presentation.png');
+  await page.locator('#projectsNavButton').click();await page.locator('[data-starter=neurips-2026]').click();await page.locator('#workspace').waitFor({state:'visible'});
+  const neurips=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST');await page.locator('#compileButton').click();assert.equal((await(await neurips).json()).success,true);await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));await capture('neurips-paper.png');
   assert.deepEqual(errors,[]);
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

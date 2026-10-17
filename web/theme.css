@@ -19,6 +19,8 @@ html[data-theme=dark] .topbar .compile:hover{background:#afd9bc}
 html[data-theme=dark] #projectHome{background:#142219}
 html[data-theme=dark] .home-sidebar,html[data-theme=dark] .sidebar{background:#17291e}
 html[data-theme=dark] .home-nav.active,html[data-theme=dark] .tree-file.active{background:#2a4431;color:#c1e5c8}
+html[data-theme=dark] .home-folder-link:hover,html[data-theme=dark] .home-folder-link.active{background:#2a4431;color:#c1e5c8}
+html[data-theme=dark] .project-directory{background:#1c2f21;border-color:#3a4e36}html[data-theme=dark] .directory-cover{background:#2b4028}html[data-theme=dark] .directory-cover svg{color:#9bb98f}html[data-theme=dark] .project-move{background:#2b4028;color:#bad8b6}html[data-theme=dark] .folder-drop-target{background:#304f35!important}
 html[data-theme=dark] .home-nav.active>span{color:#b6d9b8}
 html[data-theme=dark] .home-nav small{background:#3b5d41;color:#d0e7cc}
 html[data-theme=dark] .home-nav>span,html[data-theme=dark] .file-icon,html[data-theme=dark] .project-open{color:#9bb98f}

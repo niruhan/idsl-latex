@@ -10,7 +10,7 @@ After setup:
 ./labtex test
 ```
 
-Tests use temporary databases and fictional addresses under `example.test`. They cover authentication, invitation expiry/reuse/revocation, independent projects, project permissions, concurrent-save conflicts, ZIP traversal, history quotas, request limits, per-client throttling, PDF build success/failure, and private/idempotent Typst sample creation with quota enforcement. Sandbox tests check that private files and environment values are hidden, system mounts are read-only, and the compiler has no external network.
+Tests use temporary databases and fictional addresses under `example.test`. They cover authentication, invitation expiry/reuse/revocation, independent projects, project permissions, concurrent-save conflicts, ZIP traversal, history quotas, request limits, per-client throttling, PDF build success/failure, and private/idempotent Typst sample creation with quota enforcement. Project-folder tests check per-user isolation, viewer organization, atomic creation, persistence, empty-only deletion, name validation, cycle/depth limits, quotas, and placement cleanup. Sandbox tests check that private files and environment values are hidden, system mounts are read-only, and the compiler has no external network.
 
 The installer also checks namespaces and compiles a real sample through the offline compiler. `./labtex doctor` repeats these checks. Never bypass failed isolation checks for a shared deployment.
 
@@ -18,7 +18,7 @@ CI runs the backend/installer tests with a distribution TeX Live installation. N
 
 ## Browser regression test
 
-On Mac, after compiler setup, run all five browser suites against a temporary database:
+On Mac, after compiler setup, run all seven browser suites against a temporary database:
 
 ```sh
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
@@ -29,6 +29,12 @@ python3 tests/run_browser.py
 This covers LaTeX/Typst editing and real builds, the project explorer and navigation, and appearance preferences (one-click Light/Dark switching, System in account settings, reload persistence, device changes, tab synchronization, and mobile controls). It leaves `data/` untouched. Install Playwright separately and use Node 20+; set `CHROME_BIN` when using an existing Chromium browser.
 
 File-tree checks cover nested folder controls, keyboard operation, persistence across refreshes and projects, and search results inside collapsed folders.
+
+`browser_project_folders.cjs` checks nested project folders, breadcrumbs, move dialogs and drag/drop, folder links and browser history, search across folders, creation/import into the current folder, rename/reparent, empty-folder deletion, and grid/list/dark/mobile views. It also verifies that moving a project leaves its content and revision unchanged.
+
+`browser_templates_palettes.cjs` checks all five palettes in light/dark mode, text contrast, tab synchronization and persistence, source/PDF preservation, mobile controls, template gallery creation in the current folder, and real Western/NeurIPS builds. Backend template tests also check private independent copies, authentication, quotas, and upstream file hashes in `templates/upstream.json`.
+
+Bundled starters live under `templates/`; `project_templates.py` lists their public metadata and loads only those fixed directories. Keep personal source out of this catalog. Preserve upstream notices and update recorded hashes deliberately when replacing Touying or the NeurIPS author kit. The release checker permits only the original upstream author contact in each specific attribution file, and the Western logo as a reviewed template image.
 
 For the Linux deployment's browser checks:
 
@@ -60,7 +66,7 @@ NODE_BIN=/path/to/node \
 python3 tests/run_browser.py --screenshots
 ```
 
-This runs `tests/capture_docs.cjs` instead of the regression suites. It requires a fresh database, creates only fictional `example.test` demo accounts and starter documents, captures grid/list/mobile project views, both editors, visual mode, sharing, GitHub settings, and dark mode into `docs/images/`, then discards the database. It never uses the personal installation or writes to GitHub. The backup screenshot leaves its token field empty; sharing screenshots must not show generated invitation links.
+This runs `tests/capture_docs.cjs` instead of the regression suites. It requires a fresh database, creates only fictional `example.test` demo accounts and starter documents, captures grid/list/mobile project views, both editors, visual mode, sharing, GitHub settings, dark mode, the palette picker, and the Western/NeurIPS starters into `docs/images/`, then discards the database. It never uses the personal installation or writes to GitHub. The backup screenshot leaves its token field empty; sharing screenshots must not show generated invitation links.
 
 Inspect every screenshot before publishing. Check image metadata as well as visible pixels; never capture live projects or use redaction as a substitute for a disposable fixture.
 

@@ -18,6 +18,8 @@ These controls share the host kernel. They do not eliminate kernel, parser, runt
 - Account invitations are single-use, expire after seven days, and require an exact approved address. Email ownership is **not** verified. Link possession authorizes signup; distribute links privately.
 - The project explorer only lists accessible projects. The sample endpoint creates a private project for the current account, enforces ownership and project limits, and preserves sample edits on later visits.
 - Project permissions are checked on each request. Account administration does not grant document access through the UI/API.
+- Project folders and placements are scoped to the signed-in account. Viewers can organize accessible projects without gaining write access or changing another user's layout. Folder creation and nesting are bounded; deletion requires an empty folder.
+- The starter gallery lists bundled public templates. Instantiation creates a private owned project, applies folder ownership checks and project quotas, and never reads a user-supplied filesystem path. Browsing the gallery creates no projects.
 - Request concurrency, body sizes, authentication attempts, uploads, build queues, history, and per-account project counts are bounded. These are availability mitigations, not a complete denial-of-service defense or global disk quota.
 
 ## Hosting
@@ -40,4 +42,4 @@ The Mac local runner binds to loopback and runs compilers as the current user, u
 
 Only project owners may configure or trigger GitHub backups. Tokens are supplied per browser session in request bodies, used only for requests to the fixed GitHub API hostname, and never persisted. Backup configuration and commit identifiers are stored separately from source. Snapshots exclude the application database and local build output. GitHub permissions and repository visibility control access to backed-up source. Branches are updated without force; local data remains on errors.
 
-Appearance stores only `light`, `dark`, or `system` in browser localStorage. It does not store account details or GitHub credentials. Documentation screenshots use disposable fictional accounts and starter documents; generated invitation links and populated token fields must never appear in published images.
+Appearance stores only a fixed palette identifier and `light`, `dark`, or `system` in browser localStorage. It does not store account details or GitHub credentials. Documentation screenshots use disposable fictional accounts and starter documents; generated invitation links and populated token fields must never appear in published images.

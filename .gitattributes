@@ -1,3 +1,8 @@
 * text=auto eol=lf
 *.png binary
 *.zip binary
+
+# Preserve upstream formatting; templates/upstream.json pins their exact bytes.
+templates/neurips-2026/checklist.tex -whitespace
+templates/neurips-2026/neurips_2026.sty -whitespace
+templates/western-presentation/vendor/touying/** -whitespace

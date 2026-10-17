@@ -1,7 +1,7 @@
 import {escapeHTML as esc,renderVisual,renderTypstVisual} from './visual.js';
 const $=id=>document.getElementById(id);
 const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,githubToken:'',backupAuto:false};
-const Home={visible:false,projects:[],sampleId:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
+const Home={visible:false,projects:[],folders:[],templates:[],folder:null,sampleId:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
 const FileTree={projects:new Map(),searchKey:null,searchCollapsed:new Set()};
 let saveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false,navigationId=0;const backupTimers=new Map();
 const isTypst=()=>S.file?.path.endsWith('.typ');
@@ -110,13 +110,13 @@ function updateBuild(force=false){if(!S.project)return;const b=S.project.build;c
 }
 async function compile(){if(!S.project||S.building||!editable())return;const buildPid=S.project.id;if(!await save()||S.project?.id!==buildPid)return;clearTimeout(autoTimer);S.building=true;$('compileButton').disabled=true;$('firstCompileButton').disabled=true;$('compileButton').querySelector('span').textContent='Compiling…';$('buildStatus').textContent='Building PDF…';$('buildStatus').className='build-status';
  try{const result=await api('/api/projects/'+buildPid+'/compile','POST',{});if(S.project?.id!==buildPid){toast(result.success?'Previous project compiled successfully.':'Previous project build failed. Open its build log for details.');return;}$('buildLog').textContent=result.log;renderDiagnostics(result.log);const project=await api('/api/projects/'+buildPid);if(S.project?.id!==buildPid)return;S.project=project;updateBuild(true);if(!result.success){$('logPanel').hidden=false;toast('Compilation failed. The build log has the details.');}else toast(`PDF compiled in ${result.seconds}s.`);}catch(e){$('buildLog').textContent=e.message;$('logPanel').hidden=false;throw e;}finally{S.building=false;$('compileButton').disabled=!editable();$('firstCompileButton').disabled=!editable();$('compileButton').querySelector('span').textContent='Compile';updateBuild();if(compileAgain){compileAgain=false;scheduleCompile();}}}
-async function projects({historyMode='push'}={}){
+async function projects({historyMode='push',folder=Home.folder}={}){
  if(S.project&&!await save())return;
  ++navigationId;clearTimeout(autoTimer);
  S.project=null;S.file=null;S.dirty=false;S.pdfKey=null;replacePdfFrame();
  $('workspace').hidden=true;$('auth').hidden=true;$('projectHome').hidden=false;
- Home.visible=true;closeModal();document.title='Projects · IDSL Lab';
- setProjectRoute('#projects',historyMode);
+ Home.visible=true;Home.folder=folder;Home.filter='all';$('projectSearch').value='';closeModal();document.title='Projects · IDSL Lab';
+ setProjectRoute(projectFolderRoute(folder),historyMode);
  $('projectCount').textContent='Loading projects…';
  const sample=await api('/api/sample-project','POST',{});Home.sampleId=sample.id;
  await refreshProjects();
@@ -126,7 +126,65 @@ function setProjectRoute(hash,mode='push'){
  history[mode==='replace'?'replaceState':'pushState'](null,'',hash);
 }
 async function refreshProjects(){
- const response=await api('/api/projects');Home.projects=response.projects;renderProjects();
+ const [response,folders,templates]=await Promise.all([api('/api/projects'),api('/api/project-folders'),api('/api/templates')]);Home.projects=response.projects;Home.folders=folders.folders;Home.templates=templates.templates;
+ if(Home.folder&&!Home.folders.some(folder=>folder.id===Home.folder)){Home.folder=null;if(Home.visible)setProjectRoute('#projects','replace');}
+ renderProjects();renderStarterProjects();
+}
+function renderStarterProjects(){
+ const list=$('starterProjects');list.replaceChildren();
+ for(const template of Home.templates){
+  const card=document.createElement('article');card.className='starter-card '+template.id;
+  card.innerHTML=`<span class="starter-icon" aria-hidden="true">${template.format==='typst'?'W':'N'}</span><div><h3>${esc(template.name)}</h3><p>${esc(template.description)}</p><span class="starter-format">${template.format==='typst'?'Typst · Presentation':'LaTeX · Paper'}</span></div><button class="outline" data-starter="${esc(template.id)}">Use template <span aria-hidden="true">→</span></button>`;
+  card.querySelector('button').addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const result=await api('/api/projects','POST',{templateId:template.id,folder:Home.folder});await openProject(result.id);}catch(error){fail(error);}finally{button.disabled=false;}});list.append(card);
+ }
+}
+const projectFolderRoute=id=>'#projects'+(id?'&folder='+encodeURIComponent(id):'');
+function projectFolderChain(id){const chain=[],seen=new Set();while(id&&!seen.has(id)){seen.add(id);const folder=Home.folders.find(folder=>folder.id===id);if(!folder)break;chain.unshift(folder);id=folder.parent;}return chain;}
+const projectFolderPath=id=>projectFolderChain(id).map(folder=>folder.name).join(' / ');
+const folderContains=(id,parent)=>parent===null||projectFolderChain(id).some(folder=>folder.id===parent);
+function showProjectFolder(id,historyMode='push'){
+ Home.folder=id;Home.filter='all';$('projectSearch').value='';setProjectRoute(projectFolderRoute(id),historyMode);renderProjects();
+}
+function bindProjectDrop(target,folder){
+ const type='application/x-labtex-project';
+ target.addEventListener('dragover',event=>{if(!event.dataTransfer.types.includes(type))return;event.preventDefault();event.dataTransfer.dropEffect='move';target.classList.add('folder-drop-target');});
+ target.addEventListener('dragleave',event=>{if(!target.contains(event.relatedTarget))target.classList.remove('folder-drop-target');});
+ target.addEventListener('drop',event=>{if(!event.dataTransfer.types.includes(type))return;event.preventDefault();event.stopPropagation();target.classList.remove('folder-drop-target');const project=Home.projects.find(project=>project.id===event.dataTransfer.getData(type));if(project)moveProjectToFolder(project,folder).catch(fail);});
+}
+function projectFolderLink(link,id){
+ link.href=projectFolderRoute(id);link.addEventListener('click',event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();showProjectFolder(id);});bindProjectDrop(link,id);
+}
+function renderProjectFolders(){
+ const nav=$('projectFolderNav');nav.replaceChildren();
+ for(const folder of [...Home.folders].sort((a,b)=>projectFolderPath(a.id).localeCompare(projectFolderPath(b.id)))){
+  const link=document.createElement('a');link.className='home-folder-link';link.dataset.folder=folder.id;link.title=projectFolderPath(folder.id);link.style.setProperty('--folder-depth',projectFolderChain(folder.id).length-1);
+  const icon=document.createElement('span'),name=document.createElement('span');icon.textContent='▱';icon.setAttribute('aria-hidden','true');name.textContent=folder.name;link.append(icon,name);
+  if(Home.folder===folder.id){link.classList.add('active');link.setAttribute('aria-current','page');}projectFolderLink(link,folder.id);nav.append(link);
+ }
+ $('noProjectFolders').hidden=Home.folders.length>0;$('folderLocation').hidden=!Home.folder;
+ const breadcrumbs=$('folderBreadcrumbs');breadcrumbs.replaceChildren();
+ for(const folder of [{id:null,name:'All projects'},...projectFolderChain(Home.folder)]){
+  if(breadcrumbs.childNodes.length){const separator=document.createElement('span');separator.textContent='›';separator.setAttribute('aria-hidden','true');breadcrumbs.append(separator);}
+  const link=document.createElement('a');link.textContent=folder.name;if(folder.id===Home.folder)link.setAttribute('aria-current','page');projectFolderLink(link,folder.id);breadcrumbs.append(link);
+ }
+}
+function projectFolderOptions(exclude=null){
+ return '<option value="">All projects (root)</option>'+[...Home.folders].filter(folder=>!exclude||!folderContains(folder.id,exclude)).sort((a,b)=>projectFolderPath(a.id).localeCompare(projectFolderPath(b.id))).map(folder=>`<option value="${esc(folder.id)}">${esc(projectFolderPath(folder.id))}</option>`).join('');
+}
+async function moveProjectToFolder(project,folder){
+ if((project.folder||null)===folder){closeModal();return;}
+ await api('/api/projects/'+project.id+'/folder','PUT',{folder});await refreshProjects();closeModal();toast('Project moved to '+(projectFolderPath(folder)||'All projects')+'.');
+}
+function moveProjectDialog(project){
+ modal('Move project',`<p>${esc(project.name)}</p><form id="moveProjectForm"><label>Destination folder<select id="projectFolderTarget">${projectFolderOptions()}</select></label><p class="hint">This changes only your project list. Sharing permissions stay the same.</p><div class="actions"><button class="primary">Move project</button></div></form>`);
+ $('projectFolderTarget').value=project.folder||'';$('moveProjectForm').addEventListener('submit',event=>{event.preventDefault();moveProjectToFolder(project,$('projectFolderTarget').value||null).catch(fail);});
+}
+function projectFolderDialog(folder=null){
+ const hasContents=folder&&(Home.projects.some(project=>project.folder===folder.id)||Home.folders.some(child=>child.parent===folder.id));
+ modal(folder?'Folder settings':'New project folder',`<form id="projectFolderForm"><label>Folder name<input id="projectFolderName" required maxlength="80" autofocus></label><label>Parent folder<select id="projectFolderParent">${projectFolderOptions(folder?.id)}</select></label><div class="actions">${folder?`<button id="deleteProjectFolder" type="button" class="outline danger" ${hasContents?'disabled title="Move the contents out before deleting this folder"':''}>Delete empty folder</button>`:''}<button class="primary">${folder?'Save folder':'Create folder'}</button></div></form>`);
+ $('projectFolderName').value=folder?.name||'';$('projectFolderParent').value=(folder?folder.parent:Home.folder)||'';
+ $('projectFolderForm').addEventListener('submit',async event=>{event.preventDefault();try{const data={name:$('projectFolderName').value,parent:$('projectFolderParent').value||null};const result=await api('/api/project-folders'+(folder?'/'+folder.id:''),folder?'PUT':'POST',data);await refreshProjects();closeModal();showProjectFolder(folder?.id||result.id);toast(folder?'Folder updated.':'Folder created.');}catch(error){fail(error);}});
+ if(folder)action('deleteProjectFolder',async()=>{await api('/api/project-folders/'+folder.id,'DELETE',{});Home.folder=folder.parent;await refreshProjects();closeModal();showProjectFolder(Home.folder,'replace');toast('Empty folder deleted.');});
 }
 function renderProjects(){
  const term=$('projectSearch').value.trim().toLocaleLowerCase();
@@ -134,15 +192,22 @@ function renderProjects(){
  const matches=Home.projects.filter(p=>{
   const typst=p.main.endsWith('.typ');
   const filter=Home.filter==='all'||Home.filter==='owned'&&p.role==='owner'||Home.filter==='shared'&&p.role!=='owner'||Home.filter==='typst'&&typst||Home.filter==='latex'&&!typst;
-  return filter&&[p.name,p.main,typst?'typst':'latex'].join(' ').toLocaleLowerCase().includes(term);
+  const scope=Home.filter!=='all'||term?folderContains(p.folder||null,Home.folder):(p.folder||null)===Home.folder;
+  return filter&&scope&&[p.name,p.main,typst?'typst':'latex',projectFolderPath(p.folder)].join(' ').toLocaleLowerCase().includes(term);
  }).sort((a,b)=>Home.sort==='name'?a.name.localeCompare(b.name):b.updated-a.updated||a.name.localeCompare(b.name));
- $('homeHeading').textContent=names[Home.filter];$('allProjectsCount').textContent=Home.projects.length;
- $('projectCount').textContent=`${matches.length} project${matches.length===1?'':'s'}`+(term?' matching your search':'');
+ const folders=Home.filter==='all'?Home.folders.filter(folder=>term?folder.id!==Home.folder&&folderContains(folder.id,Home.folder)&&projectFolderPath(folder.id).toLocaleLowerCase().includes(term):folder.parent===Home.folder).sort((a,b)=>a.name.localeCompare(b.name)):[];
+ $('homeHeading').textContent=Home.folder?Home.folders.find(folder=>folder.id===Home.folder)?.name:names[Home.filter];$('allProjectsCount').textContent=Home.projects.length;
+ $('projectCount').textContent=(folders.length?`${folders.length} folder${folders.length===1?'':'s'} · `:'')+`${matches.length} project${matches.length===1?'':'s'}`+(term?' matching your search':'');
+ $('projectSearch').placeholder=Home.folder?'Search this folder…':'Search projects…';renderProjectFolders();
  $('projectList').className='project-browser '+(Home.view==='list'?'list-view':'grid-view');
  $('projectGridView').classList.toggle('active',Home.view!=='list');$('projectGridView').setAttribute('aria-pressed',String(Home.view!=='list'));
  $('projectListView').classList.toggle('active',Home.view==='list');$('projectListView').setAttribute('aria-pressed',String(Home.view==='list'));
- document.querySelectorAll('[data-project-filter]').forEach(button=>{const active=button.dataset.projectFilter===Home.filter;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
+ document.querySelectorAll('[data-project-filter]').forEach(button=>{const active=!Home.folder&&button.dataset.projectFilter===Home.filter;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
  const list=$('projectList');list.replaceChildren();
+ for(const folder of folders){
+  const link=document.createElement('a');link.className='project-directory';link.dataset.folder=folder.id;const count=Home.projects.filter(project=>folderContains(project.folder,folder.id)).length;
+  link.innerHTML=`<div class="directory-cover" aria-hidden="true"><svg viewBox="0 0 64 52" fill="none"><path d="M5 12V7a3 3 0 0 1 3-3h17l7 8h24a3 3 0 0 1 3 3v29a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V12Z" fill="currentColor" opacity=".18"/><path d="M5 18v-11a3 3 0 0 1 3-3h17l7 8h24a3 3 0 0 1 3 3v29a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V18h54" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg></div><div class="directory-details"><h2>${esc(folder.name)}</h2><p>${count} project${count===1?'':'s'} <span aria-hidden="true">→</span></p></div>`;link.title=projectFolderPath(folder.id);projectFolderLink(link,folder.id);list.append(link);
+ }
  for(const project of matches){
   const typst=project.main.endsWith('.typ'),sample=project.id===Home.sampleId;
   const link=document.createElement('a');link.className='project-entry';link.href='#project='+project.id;link.dataset.project=project.id;
@@ -150,13 +215,22 @@ function renderProjects(){
   const updated=date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()!==new Date().getFullYear()?{year:'numeric'}:{})});
   const role=project.role==='owner'?'Owned by you':project.role==='editor'?'Shared · Can edit':'Shared · View only';
   link.innerHTML=`<div class="project-cover ${typst?'typst':'latex'}" aria-hidden="true"><span class="project-format">${typst?'Typst':'LaTeX'}</span>${sample?'<span class="project-sample-badge">SAMPLE</span>':''}<div class="project-page"><span class="project-page-title">${typst?'Aa':'TᴇX'}</span><span class="project-page-line"></span><span class="project-page-line short"></span><span class="project-page-equation">x = √α · x₀</span><span class="project-page-line"></span><span class="project-page-line short"></span></div></div><div class="project-details"><h2 title="${esc(project.name)}">${esc(project.name)}</h2><div class="project-meta"><span>${esc(project.main)}</span><time datetime="${date.toISOString()}" title="${esc(date.toLocaleString())}">${esc(updated)}</time></div><div class="project-owner"><span><span class="owner-dot" aria-hidden="true">${project.role==='owner'?'Y':'S'}</span>${role}</span><span class="project-open" aria-hidden="true">↗</span></div></div>`;
-  link.addEventListener('click',event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();openProject(project.id).catch(fail);});list.append(link);
+  if(project.folder&&(term||Home.filter!=='all')){const location=document.createElement('p');location.className='project-location';location.textContent=projectFolderPath(project.folder);link.querySelector('.project-details').append(location);}
+  link.draggable=true;link.addEventListener('dragstart',event=>{event.dataTransfer.setData('application/x-labtex-project',project.id);event.dataTransfer.effectAllowed='move';});
+  link.addEventListener('click',event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();openProject(project.id).catch(fail);});
+  const item=document.createElement('div');item.className='project-item';item.append(link);const move=document.createElement('button');move.className='project-move';move.textContent='↪';move.title='Move to folder';move.setAttribute('aria-label','Move '+project.name+' to folder');move.dataset.moveProject=project.id;move.addEventListener('click',()=>moveProjectDialog(project));item.append(move);list.append(item);
  }
- $('projectsEmpty').hidden=matches.length>0;
- $('projectsEmpty').querySelector('h2').textContent=term?'No matching projects.':Home.filter==='shared'?'Nothing shared with you yet.':'No projects here yet.';
- $('projectsEmptyText').textContent=term?'Try another name, or choose a different filter.':Home.filter==='shared'?'Projects your coauthors share with you will appear here.':'Create a project or import an existing ZIP to get started.';
+ $('projectsEmpty').hidden=matches.length+folders.length>0;
+ $('projectsEmpty').querySelector('h2').textContent=term?'No matching projects.':Home.filter==='shared'?'Nothing shared with you yet.':Home.folder?'This folder is empty.':'No projects here yet.';
+ $('projectsEmptyText').textContent=term?'Try another name, or choose a different filter.':Home.filter==='shared'?'Projects your coauthors share with you will appear here.':Home.folder?'Create a project here, or move one into this folder from All projects.':'Create a project or import an existing ZIP to get started.';
 }
-function newProject(){modal('A new beginning',`<form id="newProjectForm"><label>Project name<input name="name" placeholder="My research paper" required maxlength="120" autofocus></label><label>Document format<select name="format"><option value="typst">Typst · fast preview & readable markup</option><option value="latex">LaTeX · Overleaf compatible</option></select></label><label>Start with<select name="template"><option value="true">Research starter · equations & bibliography</option><option value="false">Blank article</option></select></label><div class="actions"><button class="primary">Create project</button></div></form>`);$('newProjectForm').addEventListener('submit',async e=>{e.preventDefault();const form=new FormData(e.target);try{const r=await api('/api/projects','POST',{name:form.get('name'),format:form.get('format'),template:form.get('template')==='true'});await openProject(r.id);}catch(e){fail(e);}});}
+function newProject(){
+ modal('A new beginning',`<form id="newProjectForm"><label>Project name<input name="name" placeholder="My research paper" required maxlength="120" autofocus></label><label>Document format<select name="format"><option value="typst">Typst · fast preview & readable markup</option><option value="latex">LaTeX · Overleaf compatible</option></select></label><label>Start with<select name="template"></select></label><div class="actions"><button class="primary">Create project</button></div></form>`);
+ const form=$('newProjectForm'),select=form.elements.template;
+ function options(){select.innerHTML='<option value="true">Research starter · equations & bibliography</option><option value="false">Blank article</option>'+Home.templates.filter(template=>template.format===form.elements.format.value).map(template=>`<option value="${esc(template.id)}">${esc(template.name)}</option>`).join('');}
+ options();form.elements.format.addEventListener('change',options);
+ form.addEventListener('submit',async event=>{event.preventDefault();const data=new FormData(form),template=data.get('template');try{const r=await api('/api/projects','POST',{name:data.get('name'),format:data.get('format'),...(template==='true'||template==='false'?{template:template==='true'}:{templateId:template}),folder:Home.folder});await openProject(r.id);}catch(error){fail(error);}});
+}
 async function share(){const r=await api(apiPath('members'));const owner=S.project.role==='owner';modal('A paper is better together',`<p>Everyone invited can access this project on your lab server. Editor invitations allow changes; viewer invitations are read-only.</p><div>${r.members.map(m=>`<div class="member-row"><div><strong>${esc(m.name)}</strong><small>${esc(m.email)}</small></div><span class="badge">${esc(m.role)}</span>${owner&&m.role!=='owner'?`<button class="icon danger" data-remove="${m.id}" title="Remove member">×</button>`:''}</div>`).join('')}</div>${owner?'<label style="margin-top:22px">Invite a coauthor<select id="inviteRole"><option value="editor">Can edit and compile</option><option value="viewer">Can view and download</option></select></label><button id="createInvite" class="primary full">Create invitation link</button><div id="inviteResult"></div><p class="hint">Each link is single-use and expires after 7 days. Share it directly with the intended person.</p>':'<p>Only the project owner can invite or remove members.</p>'}`);
  if(owner){action('createInvite',async()=>{const invite=await api(apiPath('invite'),'POST',{role:$('inviteRole').value});$('inviteResult').innerHTML='<label style="margin-top:18px">Invitation link<input id="inviteUrl" readonly></label><button id="copyInvite" class="outline full">Copy link</button>';$('inviteUrl').value=invite.url;action('copyInvite',async()=>{try{await navigator.clipboard.writeText(invite.url);toast('Invitation link copied.');}catch{$('inviteUrl').select();toast('Select and copy the invitation link.');}});});document.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',async()=>{if(!confirm('Remove this member from the project?'))return;try{await api(apiPath('members'),'DELETE',{userId:b.dataset.remove});await share();}catch(e){fail(e);}}));}}
 async function historyDialog(){if(!S.file||S.file.content===null)return;const r=await api(apiPath('history')+'?path='+encodeURIComponent(S.file.path));modal('File history',`<p>${esc(S.file.path)} · Up to 30 previous saved revisions. Restoring creates a new saved revision.</p><div>${r.versions.map(v=>`<div class="history-row"><div>Revision ${v.revision}<small>${new Date(v.created*1000).toLocaleString()} · saved over by ${esc(v.author)}</small></div><button class="outline" data-version="${v.id}">Inspect</button></div>`).join('')||'<p class="empty-state">Earlier versions appear here after you save changes.</p>'}</div>`);document.querySelectorAll('[data-version]').forEach(b=>b.addEventListener('click',async()=>{try{const v=await api(apiPath('history')+'?path='+encodeURIComponent(S.file.path)+'&id='+b.dataset.version);modal('Revision '+v.revision,`<textarea id="oldVersion" class="version-preview" readonly></textarea><div class="actions"><button id="backHistory" class="outline">Back</button>${editable()?'<button id="restoreVersion" class="primary">Restore this version</button>':''}</div>`);$('oldVersion').value=v.content;action('backHistory',historyDialog);if(editable())action('restoreVersion',async()=>{if(!await save())return;setText(v.content);editorMode(S.mode);await save();closeModal();toast('Version restored.');});}catch(e){fail(e);}}));}
@@ -185,7 +259,7 @@ async function authenticate(){
  let pid=new URLSearchParams(location.hash.slice(1)).get('project');
  if(S.invite&&!S.demo){const joined=await api('/api/join','POST',{token:S.invite});pid=joined.id;S.invite=null;history.replaceState(null,'','#project='+pid);toast('You joined the project.');}
  if(S.signup){S.signup=null;history.replaceState(null,'',location.pathname);}
- if(pid){const r=await api('/api/projects');if(r.projects.some(p=>p.id===pid)){await openProject(pid,{historyMode:'replace'});return;}}await projects({historyMode:'replace'});
+ if(pid){const r=await api('/api/projects');if(r.projects.some(p=>p.id===pid)){await openProject(pid,{historyMode:'replace'});return;}}await projects({historyMode:'replace',folder:new URLSearchParams(location.hash.slice(1)).get('folder')});
 }
 function renderAuth(){
  const mode=S.authMode;
@@ -214,7 +288,7 @@ window.addEventListener('hashchange',async()=>{
   if(S.dirty&&!await save()){if(S.project)setProjectRoute('#project='+S.project.id,'replace');return;}
   if(params.has('invite')||params.has('signup')){S.invite=params.get('invite');S.signup=params.get('signup');await authenticate();}
   else if(S.user&&params.has('project')&&params.get('project')!==S.project?.id)await openProject(params.get('project'),{historyMode:'none'});
-  else if(S.user&&!params.has('project'))await projects({historyMode:'none'});
+  else if(S.user&&!params.has('project'))await projects({historyMode:'none',folder:params.get('folder')});
  }catch(e){fail(e);}
 });
 action('closeModal',closeModal);action('projectsButton',projects);action('projectsNavButton',projects);action('sourceTab',()=>editorMode('source'));action('visualTab',()=>editorMode('visual'));action('saveButton',save);action('compileButton',compile);action('firstCompileButton',compile);action('shareButton',share);action('backupButton',backupDialog);action('historyButton',historyDialog);action('newFileButton',addFile);action('fileMenuButton',fileMenu);action('uploadButton',()=>$('uploadFiles').click());
@@ -233,7 +307,7 @@ $('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener
 $('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();}catch(e){fail(e);}});
 $('autoCompile').addEventListener('change',()=>{localStorage.setItem('labtex-auto:'+S.project.id,String($('autoCompile').checked));clearTimeout(autoTimer);if($('autoCompile').checked)compile().catch(fail);});
 $('uploadFiles').addEventListener('change',async e=>{try{if(!await save())return;let last;for(const file of e.target.files){if(file.size>8*1024*1024)throw Error(file.name+' exceeds 8 MB.');const exists=S.project.files.find(x=>x.path===file.name);if(exists&&!confirm('Replace '+file.name+'?'))continue;await api(apiPath('file'),'PUT',{path:file.name,base64:await base64File(file),revision:exists?.revision||0});last=file.name;}S.project=await api(apiPath());renderFiles();if(last)await loadFile(last,true);toast('Files uploaded.');}catch(e){fail(e);}finally{e.target.value='';}});
-$('importZip').addEventListener('change',async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>40*1024*1024)throw Error('ZIP exceeds 40 MB.');toast('Importing project…');const r=await api('/api/projects','POST',{name:file.name.replace(/\.zip$/i,''),zip:await base64File(file)});await openProject(r.id);toast('Project imported. Check the main document, then compile.');}catch(e){fail(e);}finally{e.target.value='';}});
+$('importZip').addEventListener('change',async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>40*1024*1024)throw Error('ZIP exceeds 40 MB.');toast('Importing project…');const r=await api('/api/projects','POST',{name:file.name.replace(/\.zip$/i,''),zip:await base64File(file),folder:Home.folder});await openProject(r.id);toast('Project imported. Check the main document, then compile.');}catch(e){fail(e);}finally{e.target.value='';}});
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save().catch(fail);}if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();compile().catch(fail);}});
 window.addEventListener('beforeunload',e=>{if(S.dirty||S.saving){keepDraft();e.preventDefault();e.returnValue='';}});
 const handle=$('splitHandle');handle.addEventListener('pointerdown',e=>{handle.setPointerCapture(e.pointerId);handle.dataset.drag='1';});handle.addEventListener('pointermove',e=>{if(!handle.dataset.drag)return;const r=$('workbench').getBoundingClientRect();const percent=Math.max(25,Math.min(75,(e.clientX-r.left)/r.width*100));$('workbench').style.gridTemplateColumns=`minmax(200px,${percent}fr) 6px minmax(200px,${100-percent}fr)`;});handle.addEventListener('pointerup',()=>delete handle.dataset.drag);handle.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const p=Math.max(25,Math.min(75,Number(handle.dataset.percent||50)+(e.key==='ArrowRight'?5:-5)));handle.dataset.percent=p;$('workbench').style.gridTemplateColumns=`minmax(200px,${p}fr) 6px minmax(200px,${100-p}fr)`;}});
@@ -297,11 +371,13 @@ async function backupDialog(){
 
 // The project explorer is a page, with browser-history navigation to editors.
 action('createProject',newProject);action('emptyNewProject',newProject);action('importProject',()=>$('importZip').click());action('refreshProjects',refreshProjects);
+action('createProjectFolder',()=>projectFolderDialog());action('sidebarNewFolder',()=>projectFolderDialog());action('manageProjectFolder',()=>projectFolderDialog(Home.folders.find(folder=>folder.id===Home.folder)));
+bindProjectDrop(document.querySelector('[data-project-filter="all"]'),null);
 action('openSampleProject',async()=>{const sample=await api('/api/sample-project','POST',{recreate:true});if(!sample.id)throw Error('Your project limit is reached. Export and delete an unused project before adding the sample.');Home.sampleId=sample.id;await openProject(sample.id);});
 $('projectSearch').addEventListener('input',renderProjects);
 $('projectSort').addEventListener('change',()=>{Home.sort=$('projectSort').value;renderProjects();});
 for(const [id,view] of [['projectGridView','grid'],['projectListView','list']])action(id,()=>{Home.view=view;localStorage.setItem('labtex-project-view',view);renderProjects();});
-document.querySelectorAll('[data-project-filter]').forEach(button=>button.addEventListener('click',()=>{Home.filter=button.dataset.projectFilter;renderProjects();}));
+document.querySelectorAll('[data-project-filter]').forEach(button=>button.addEventListener('click',()=>{Home.filter=button.dataset.projectFilter;Home.folder=null;setProjectRoute('#projects');renderProjects();}));
 document.addEventListener('keydown',event=>{if(Home.visible&&!$('modal').open&&event.key==='/'&&!/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)){event.preventDefault();$('projectSearch').focus();}});
 
 function updateThemeControls(){
@@ -314,12 +390,16 @@ function updateThemeControls(){
   $(id).textContent=next==='dark'?'☾':'☼';
  }
  if($('themeResolved'))$('themeResolved').textContent='Currently using the '+theme.resolved+' theme. Your PDF keeps its document colors.';
+ document.querySelectorAll('[data-palette-choice]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.paletteChoice===theme.palette)));
+ if($('themePreference'))$('themePreference').value=theme.preference;
 }
 function appearanceDialog(){
- modal('Appearance','<label>Theme<select id="themePreference" aria-label="Theme"><option value="system">System · follow your device</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p id="themeResolved" class="theme-note"></p><p>The preference is remembered in this browser and applies to your project home, editor, and sign-in screen.</p><div class="actions"><button id="closeAppearance" class="primary">Done</button></div>');
+ modal('Appearance',`<p class="hint">Choose your workspace colors. The sun/moon button still switches light and dark with one click.</p><div class="palette-choices" role="group" aria-label="Color theme">${window.labtexTheme.palettes.map(palette=>`<button type="button" class="palette-choice" data-palette-choice="${palette.id}" aria-pressed="false"><span class="palette-swatches" aria-hidden="true">${palette.colors.map(color=>`<i style="background:${color}"></i>`).join('')}</span><strong>${esc(palette.name)}</strong><small>${esc(palette.note)}</small></button>`).join('')}</div><label>Light / dark mode<select id="themePreference" aria-label="Light / dark mode"><option value="system">System · follow your device</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p id="themeResolved" class="theme-note"></p><p>The preference is remembered in this browser and applies to your project home, editor, and sign-in screen.</p><div class="actions"><button id="closeAppearance" class="primary">Done</button></div>`);
  $('themePreference').value=window.labtexTheme.preference;
  $('themePreference').addEventListener('change',()=>window.labtexTheme.set($('themePreference').value));
+ document.querySelectorAll('[data-palette-choice]').forEach(button=>button.addEventListener('click',()=>window.labtexTheme.setPalette(button.dataset.paletteChoice)));
  action('closeAppearance',closeModal);updateThemeControls();
 }
 for(const id of ['themeButton','homeThemeButton','authThemeButton'])action(id,()=>window.labtexTheme.set(window.labtexTheme.resolved==='dark'?'light':'dark'));
+for(const id of ['paletteButton','homePaletteButton','authPaletteButton'])action(id,appearanceDialog);
 window.addEventListener('labtex-themechange',updateThemeControls);updateThemeControls();

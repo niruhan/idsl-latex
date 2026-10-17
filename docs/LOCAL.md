@@ -42,9 +42,34 @@ Click a project to enter its editor. **My projects** returns to the explorer aft
 
 The first home visit creates a private **Getting started with Typst** sample for your account, with an included section, an equation, and bibliography. Click its card or **Open sample** to edit and compile it. Returning home preserves your sample edits and does not create duplicates. Deleting it keeps it deleted until you explicitly choose **Open sample** again. The sample counts toward your 25-project limit and is only added when space is available.
 
+### Organize projects into folders
+
+Click **New folder** to create a directory in the explorer. Open it to create subfolders, then use the sidebar or breadcrumbs to navigate. Each account can have up to 100 folders, nested up to 10 levels.
+
+Use the arrow button on a project card or list row to choose its destination, or drag the project onto a folder card, sidebar folder, or breadcrumb. Choose **All projects (root)** to move it out. New projects and ZIP imports start in the folder you currently have open. **Folder settings** lets you rename a folder, change its parent, or delete it once empty.
+
+The root shows folders and projects that have not been filed. Search at the root finds projects in every folder; inside a folder it includes that folder's descendants. **My projects**, **Shared with me**, **Typst**, and **LaTeX** filters search across your whole collection.
+
+Folders belong to your account. Moving a shared project changes only your own explorer; its source, sharing permissions, and other users' layouts stay the same. This organization is stored in SQLite with your projects, rather than as directories of `.typ` or `.tex` files on disk. A database backup preserves it. Source ZIP exports and GitHub backups contain document files, so restore your database to preserve the explorer layout as well.
+
+## Starter templates
+
+The **Start with a template** gallery is available on every account's project home. Click **Use template** to create your own private, editable copy in the current folder. The templates are also choices under **New project → Start with**, after selecting Typst or LaTeX. Each copy counts toward the 25-project limit; browsing the gallery creates nothing and does not overwrite earlier copies.
+
+- **Western presentation (Typst):** the supplied Western university slide design, with purple colors, logo, section headers, 16:9 slides, Libertinus Serif, and note/discussion helper boxes. Author and department are placeholders. Edit `main.typ`, `shared.typ`, and `sections/`. Touying 0.5.3 is bundled with its license; the slides require no external Typst packages.
+- **NeurIPS 2026 paper (LaTeX):** the [official 2026 style](https://neurips.cc/Conferences/2026/CallForPapers) and checklist, with an anonymous Main Track manuscript, bibliography, and appendix. Fill in your own content and checklist answers. The project's README explains preprint/final options and links to the conference guidance.
+
+The templates contain public starter content, with no personal documents or account details. Creating a copy does not share it with anyone. Original upstream licenses and attribution are included; Western's logo remains its trademark. Interface themes do not change a template's document colors.
+
+Preview the [Western presentation](images/western-presentation.png) and [NeurIPS paper](images/neurips-paper.png).
+
 ## Appearance
 
-Click the sun/moon button beside your avatar to switch between light and dark with one click. The same button is available before sign-in. To follow your device instead, choose **System** under **Account → Appearance**; this is the default until you pick a theme. The choice is remembered in this browser and synchronizes between its open tabs. The editor theme changes interface colors; PDFs retain the colors defined by the document source.
+Click **Themes** beside your avatar to choose **IDSL Forest** (the original), **Western Purple**, **Catppuccin**, **Dracula**, or **Solarized**. Each includes light and dark appearances. Catppuccin uses Latte/Mocha colors; Dracula's light appearance is an app adaptation. Western Purple uses [Western's purple and orchid palette](https://brand.westernu.ca/visual-identity/colours.html).
+
+The sun/moon button still switches light/dark with one click. In **Themes** or **Account → Appearance**, choose **System** to follow your device. The palette and mode are remembered in this browser, apply before sign-in, and synchronize between its open tabs. Preferences affect the interface; PDFs retain the colors defined by their document source.
+
+[See the theme picker](images/themes.png).
 
 ![Dark Typst editor with document preview](images/dark-theme.png)
 
@@ -81,7 +106,7 @@ To restore source, download the repository ZIP from GitHub. For the shared layou
 
 ## Browser validation
 
-Install Playwright outside this repository and use Node 20 or newer. `tests/run_browser.py` starts a disposable database and runs the project-home, file-tree, theme, LaTeX, and Typst browser regressions; it never touches `data/` or writes to GitHub.
+Install Playwright outside this repository and use Node 20 or newer. `tests/run_browser.py` starts a disposable database and runs the project-home, project-folder, file-tree, theme/palette, starter-template, LaTeX, and Typst browser regressions; it never touches `data/` or writes to GitHub.
 
 ```sh
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \

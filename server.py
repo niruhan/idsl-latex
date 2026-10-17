@@ -8,8 +8,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from core import Problem, MAX_FILE, MAX_PROJECT, MAX_FILES, SAMPLE, TYPST_SAMPLE, safe_path, pack_zip, unpack_zip, compile_project, starter_files, main_document
 from github_backup import destination, GitHub, backup_snapshot
+from project_templates import TEMPLATES, template_files
 ROOT=Path(__file__).resolve().parent
 MAX_OWNED_PROJECTS=25
+MAX_PROJECT_FOLDERS=100
+MAX_FOLDER_DEPTH=10
 MAX_HISTORY=40*1024*1024
 PUBLIC_POSTS={'/api/setup','/api/login','/api/register-lab'}
 JSON_STRUCTURE=re.compile(r'[",\[\]{}]')
@@ -69,6 +72,10 @@ CREATE TABLE IF NOT EXISTS lab_invites(id TEXT PRIMARY KEY,token TEXT UNIQUE,cre
 CREATE TABLE IF NOT EXISTS approved_emails(email TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS backup_settings(user_id TEXT PRIMARY KEY,repository TEXT,branch TEXT);
 CREATE TABLE IF NOT EXISTS project_backups(project_id TEXT PRIMARY KEY,mode TEXT,repository TEXT,branch TEXT,last_commit TEXT,last_url TEXT,last_revision INTEGER);
+CREATE TABLE IF NOT EXISTS project_folders(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,name TEXT NOT NULL,parent_id TEXT,updated REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS project_locations(user_id TEXT,project_id TEXT,folder_id TEXT,PRIMARY KEY(user_id,project_id));
+CREATE INDEX IF NOT EXISTS project_folders_parent ON project_folders(user_id,parent_id);
+CREATE INDEX IF NOT EXISTS project_locations_folder ON project_locations(user_id,folder_id);
 ''')
             # Upgrade existing installations: the original account manages lab signup.
             db.execute("INSERT OR IGNORE INTO settings SELECT 'lab_admin_id',id FROM users WHERE id!='demo' ORDER BY rowid LIMIT 1")
@@ -93,14 +100,47 @@ CREATE TABLE IF NOT EXISTS project_backups(project_id TEXT PRIMARY KEY,mode TEXT
             a=self.attempts.setdefault(ip,[])
             if len(a)>=30: raise Problem('Too many attempts. Wait ten minutes.',429)
             a.append(now)
-    def new_project(self,db,owner,name,files):
+    def folder(self,db,user_id,folder_id):
+        if not isinstance(folder_id,str) or not re.fullmatch(r'[a-f0-9]{24}',folder_id): raise Problem('Choose an existing folder.',400)
+        row=db.execute('SELECT * FROM project_folders WHERE id=? AND user_id=?',(folder_id,user_id)).fetchone()
+        if not row: raise Problem('Folder not found.',404)
+        return dict(row)
+    def folder_destination(self,db,user_id,parent,moving=None):
+        rows={row['id']:dict(row) for row in db.execute('SELECT * FROM project_folders WHERE user_id=?',(user_id,))}
+        depth=1;current=parent;seen=set()
+        while current is not None:
+            self.folder(db,user_id,current)
+            if current==moving or current in seen: raise Problem('A folder cannot be moved inside itself.',409)
+            seen.add(current);depth+=1;current=rows[current]['parent_id']
+        if moving:
+            for row in rows.values():
+                current=row['id'];distance=0;seen=set()
+                while current is not None and current!=moving:
+                    if current in seen: raise Problem('Invalid folder hierarchy.',409)
+                    seen.add(current);distance+=1;current=rows[current]['parent_id']
+                if current==moving and depth+distance>MAX_FOLDER_DEPTH: raise Problem('Folders can be nested up to 10 levels.',400)
+        if depth>MAX_FOLDER_DEPTH: raise Problem('Folders can be nested up to 10 levels.',400)
+    def folder_name(self,db,user_id,name,parent,excluding=None):
+        if not isinstance(name,str): raise Problem('Use a folder name of 1–80 characters.')
+        name=name.strip()
+        if not 1<=len(name)<=80 or name in ('.','..') or any(char in name for char in ('/','\\','\x00')): raise Problem('Use a folder name of 1–80 characters without slashes.')
+        siblings=db.execute('SELECT id,name FROM project_folders WHERE user_id=? AND parent_id IS ?',(user_id,parent))
+        if any(row['id']!=excluding and row['name'].casefold()==name.casefold() for row in siblings): raise Problem('A folder with this name already exists here.',409)
+        return name
+    def locate_project(self,db,user_id,pid,folder_id):
+        if folder_id is None: db.execute('DELETE FROM project_locations WHERE user_id=? AND project_id=?',(user_id,pid))
+        else:
+            self.folder(db,user_id,folder_id)
+            db.execute('INSERT OR REPLACE INTO project_locations VALUES(?,?,?)',(user_id,pid,folder_id))
+    def new_project(self,db,owner,name,files,folder=None):
         if db.execute('SELECT COUNT(*) FROM projects WHERE owner=?',(owner,)).fetchone()[0]>=MAX_OWNED_PROJECTS:
             raise Problem('You can own up to 25 projects. Export and delete an unused project first.',413)
+        if folder is not None: self.folder(db,owner,folder)
         pid=secrets.token_hex(12)
         main=main_document(files)
         db.execute('INSERT INTO projects VALUES(?,?,?,?,1,?)',(pid,title(name),owner,main,time.time()))
         db.execute('INSERT INTO members VALUES(?,?,?)',(pid,owner,'owner'))
-        db.executemany('INSERT INTO files VALUES(?,?,?,1)',[(pid,p,c) for p,c in files.items()]); return pid
+        db.executemany('INSERT INTO files VALUES(?,?,?,1)',[(pid,p,c) for p,c in files.items()]); self.locate_project(db,owner,pid,folder); return pid
     def access(self,db,pid,user,write=False,owner=False):
         row=db.execute('SELECT p.*,m.role FROM projects p JOIN members m ON p.id=m.project_id WHERE p.id=? AND m.user_id=?',(pid,user['id'])).fetchone()
         if not row: raise Problem('Project not found.',404)
@@ -282,7 +322,7 @@ class Handler(BaseHTTPRequestHandler):
             with app.db() as db: user=self.user(db)
             return app.backup(backup_match[1],user,data.get('token'))
         if method=='GET' and not path.startswith('/api/'):
-            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/style.css':'style.css','/theme.css':'theme.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
+            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
             if path not in allowed: raise Problem('Not found.',404)
             f=ROOT/'web'/allowed[path]; self.send(f.read_bytes(),kind=mimetypes.guess_type(f)[0] or 'text/plain'); return
         with app.db() as db:
@@ -315,6 +355,31 @@ class Handler(BaseHTTPRequestHandler):
                     app.new_project(db,user['id'],'My first paper' if path=='/api/register-lab' else 'A space for your next idea',SAMPLE)
                 result,headers=self.login(db,user); db.commit(); self.send(result,headers=headers); return
             user=self.user(db)
+            if path=='/api/templates' and method=='GET': return {'templates':list(TEMPLATES)}
+            if path=='/api/project-folders':
+                if method=='GET': return {'folders':[dict(row) for row in db.execute('SELECT id,name,parent_id AS parent,updated FROM project_folders WHERE user_id=? ORDER BY name,id',(user['id'],))]}
+                if method=='POST':
+                    db.execute('BEGIN IMMEDIATE')
+                    if db.execute('SELECT COUNT(*) FROM project_folders WHERE user_id=?',(user['id'],)).fetchone()[0]>=MAX_PROJECT_FOLDERS: raise Problem('You can create up to 100 project folders.',413)
+                    parent=data.get('parent');app.folder_destination(db,user['id'],parent)
+                    name=app.folder_name(db,user['id'],data.get('name'),parent);fid=secrets.token_hex(12)
+                    db.execute('INSERT INTO project_folders VALUES(?,?,?,?,?)',(fid,user['id'],name,parent,time.time()));return {'id':fid}
+                raise Problem('Not found.',404)
+            folder_match=re.fullmatch(r'/api/project-folders/([a-f0-9]{24})',path)
+            if folder_match:
+                if method not in ('PUT','DELETE'): raise Problem('Not found.',404)
+                db.execute('BEGIN IMMEDIATE');fid=folder_match[1];folder=app.folder(db,user['id'],fid)
+                if method=='PUT':
+                    parent=data.get('parent',folder['parent_id']);app.folder_destination(db,user['id'],parent,moving=fid)
+                    name=app.folder_name(db,user['id'],data.get('name',folder['name']),parent,excluding=fid)
+                    db.execute('UPDATE project_folders SET name=?,parent_id=?,updated=? WHERE id=?',(name,parent,time.time(),fid))
+                else:
+                    children=db.execute('SELECT 1 FROM project_folders WHERE user_id=? AND parent_id=?',(user['id'],fid)).fetchone()
+                    projects=db.execute('SELECT 1 FROM project_locations l JOIN members m ON m.user_id=l.user_id AND m.project_id=l.project_id WHERE l.user_id=? AND l.folder_id=?',(user['id'],fid)).fetchone()
+                    if children or projects: raise Problem('Move this folder’s projects and subfolders before deleting it.',409)
+                    db.execute('DELETE FROM project_locations WHERE user_id=? AND folder_id=?',(user['id'],fid))
+                    db.execute('DELETE FROM project_folders WHERE id=? AND user_id=?',(fid,user['id']))
+                return {'ok':True}
             if path=='/api/sample-project' and method=='POST':
                 db.execute('BEGIN IMMEDIATE')
                 key='typst_sample:'+user['id']
@@ -363,16 +428,24 @@ class Handler(BaseHTTPRequestHandler):
                 if not invite: raise Problem('Invitation has expired or was used.',403)
                 db.execute('INSERT OR IGNORE INTO members VALUES(?,?,?)',(invite['project_id'],user['id'],invite['role'])); db.execute('DELETE FROM invites WHERE token=?',(invite['token'],)); return {'id':invite['project_id']}
             if path=='/api/projects':
-                if method=='GET': return {'projects':[dict(x) for x in db.execute('SELECT p.id,p.name,p.main,p.updated,m.role FROM projects p JOIN members m ON p.id=m.project_id WHERE m.user_id=? ORDER BY p.updated DESC',(user['id'],))]}
+                if method=='GET': return {'projects':[dict(x) for x in db.execute('SELECT p.id,p.name,p.main,p.updated,m.role,l.folder_id AS folder FROM projects p JOIN members m ON p.id=m.project_id LEFT JOIN project_locations l ON l.project_id=p.id AND l.user_id=m.user_id WHERE m.user_id=? ORDER BY p.updated DESC',(user['id'],))]}
                 if method=='POST':
                     db.execute('BEGIN IMMEDIATE')
-                    files=unpack_zip(base64.b64decode(data['zip'],validate=True)) if data.get('zip') else starter_files(data.get('format','latex'),data.get('template',True))
-                    return {'id':app.new_project(db,user['id'],data.get('name','Untitled paper'),files)}
+                    if 'templateId' in data:
+                        if data.get('zip'): raise Problem('Choose a ZIP import or a starter template.')
+                        template,files=template_files(data['templateId']);name=data.get('name',template['name'])
+                    else:
+                        files=unpack_zip(base64.b64decode(data['zip'],validate=True)) if data.get('zip') else starter_files(data.get('format','latex'),data.get('template',True))
+                        name=data.get('name','Untitled paper')
+                    return {'id':app.new_project(db,user['id'],name,files,data.get('folder'))}
             match=re.fullmatch(r'/api/projects/([a-f0-9]{24})(?:/(.*))?',path)
             if not match: raise Problem('Not found.',404)
             pid,action=match.groups()
             if method!='GET' and action!='compile': db.execute('BEGIN IMMEDIATE')
-            p=app.access(db,pid,user,write=method!='GET')
+            p=app.access(db,pid,user,write=method!='GET' and action!='folder')
+            if action=='folder' and method=='PUT':
+                if 'folder' not in data: raise Problem('Choose a destination folder.')
+                app.locate_project(db,user['id'],pid,data['folder']);return {'ok':True}
             if action=='backup-settings':
                 app.access(db,pid,user,owner=True)
                 if method=='PUT':
@@ -401,7 +474,7 @@ class Handler(BaseHTTPRequestHandler):
                     app.touch(db,pid); return {'ok':True}
                 if method=='DELETE':
                     app.access(db,pid,user,owner=True)
-                    for table in ('members','files','history','invites','builds','project_backups'): db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
+                    for table in ('members','files','history','invites','builds','project_backups','project_locations'): db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
                     db.execute('DELETE FROM projects WHERE id=?',(pid,)); return {'ok':True}
             if action=='file':
                 name=safe_path(query.get('path',[data.get('path','')])[0]); row=db.execute('SELECT * FROM files WHERE project_id=? AND path=?',(pid,name)).fetchone()
@@ -458,7 +531,8 @@ class Handler(BaseHTTPRequestHandler):
                 app.access(db,pid,user,owner=True)
                 if method=='DELETE':
                     if data.get('userId')==p['owner']: raise Problem('The owner cannot be removed.')
-                    db.execute('DELETE FROM members WHERE project_id=? AND user_id=?',(pid,data.get('userId'))); return {'ok':True}
+                    db.execute('DELETE FROM members WHERE project_id=? AND user_id=?',(pid,data.get('userId')))
+                    db.execute('DELETE FROM project_locations WHERE project_id=? AND user_id=?',(pid,data.get('userId'))); return {'ok':True}
             if action=='invite' and method=='POST':
                 app.access(db,pid,user,owner=True); role=data.get('role','editor')
                 if role not in ('editor','viewer'): raise Problem('Choose editor or viewer.')

@@ -13,6 +13,11 @@ EMAIL = re.compile(r'[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})')
 HOME = re.compile(r'/home/([A-Za-z0-9_-]+)')
 TUNNEL = re.compile(r'https://[a-z0-9-]+\.trycloudflare\.com')
 IP = re.compile(r'(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])')
+# Public upstream author attribution, retained verbatim in these bundled files.
+UPSTREAM_CONTACTS = {
+    'templates/neurips-2026/neurips_2026.sty': {'garnett' + '@' + 'wustl.edu'},
+    'templates/western-presentation/vendor/touying/LICENSE': {'orangex4' + '@' + 'qq.com'},
+}
 
 
 def main():
@@ -32,7 +37,7 @@ def main():
         if path.stat().st_size > 1024 * 1024:
             failures.append((name, 'unexpected large release file'))
         data = path.read_bytes()
-        if name.startswith('docs/images/') and path.suffix == '.png':
+        if (name.startswith('docs/images/') or name == 'templates/western-presentation/images/western-logo.png') and path.suffix == '.png':
             if not data.startswith(b'\x89PNG\r\n\x1a\n'):
                 failures.append((name, 'invalid screenshot format'))
             continue
@@ -47,7 +52,7 @@ def main():
             failures.append((name, 'host-specific home directory'))
         for match in EMAIL.finditer(content):
             domain = match.group(1).lower()
-            if domain not in {'example.test', 'example.org', 'example.com', 'users.noreply.github.com'}:
+            if domain not in {'example.test', 'example.org', 'example.com', 'users.noreply.github.com'} and match.group() not in UPSTREAM_CONTACTS.get(name, set()):
                 failures.append((name, 'non-example email address'))
         for match in IP.finditer(content):
             value = match.group()
