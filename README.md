@@ -18,10 +18,10 @@ All screenshots use a temporary database, fictional demo accounts, and starter d
 
 - **Project explorer:** organize projects into nested folders; use **⋯** to rename, move, or delete a project, or drag it onto a folder. Cards/list, search, sorting, and format/ownership filters help you find documents. **My projects** saves and returns home.
 - **LaTeX + Typst:** source and basic visual editing, multi-file projects with collapsible folders, image previews (including SVG), right-click file actions, figures, and bibliographies.
-- **PDF preview:** manual or automatic compilation, clickable error locations, project-named PDF downloads, and an independent **Dark PDF** preview toggle.
+- **PDF preview:** manual or automatic compilation, clickable error locations, fast Typst previews while typing, project-named PDF/ZIP downloads, and an independent **Dark PDF** preview toggle.
 - **Sharing:** invite coauthors to individual projects with editor or view-only access.
 - **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.
-- **GitHub backups:** keep all projects in one repository or use a separate repository per document; optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
+- **GitHub backups:** keep all projects in one repository or use a separate repository per document; saved tokens, an all-project backup menu, and optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
 - **Import/export:** import project ZIPs (including Overleaf exports), upload assets, and download complete source ZIPs.
 - **Themes:** choose IDSL Forest, Western Purple, Nord, GitHub, or Solarized under **Account → Themes & appearance**; switch light/dark with one click on the sun/moon button.
 - **Ready-to-use templates:** Western slides and NeurIPS are featured; **More templates** offers a Typst introduction, classic LaTeX article, Western thesis scaffold, coursework, Beamer slides, and academic CV.

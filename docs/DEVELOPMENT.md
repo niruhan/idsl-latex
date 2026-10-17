@@ -18,7 +18,7 @@ CI runs the backend/installer tests with a distribution TeX Live installation. N
 
 ## Browser regression test
 
-On Mac, after compiler setup, run all ten browser suites against a temporary database:
+On Mac, after compiler setup, run all eleven browser suites against a temporary database:
 
 ```sh
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
@@ -38,7 +38,7 @@ File-tree checks cover nested folder controls, keyboard operation, persistence a
 
 `browser_library_layout.cjs` checks library search and format filtering, creation only on request, current-folder copies, account-menu keyboard navigation and dismissal, equal folder/project tile sizes, and footer clearance at desktop, laptop, and mobile viewport sizes. All eight starter templates are compiled in backend tests.
 
-`browser_file_actions.cjs` verifies right-click and keyboard menus, rename collisions, file download, replacement history and conflict protection, deletion confirmation, the main-document guard, viewer permissions, and mobile bounds. PDF exports are checked for project-based filenames.
+`browser_file_actions.cjs` verifies right-click and keyboard menus, rename collisions, file download, replacement history and conflict protection, deletion confirmation, the main-document guard, viewer permissions, and mobile bounds. PDF and source ZIP exports are checked for project-based filenames. `browser_drag_live.cjs` covers editor file/folder moves, explorer folder moves and parent/root navigation, desktop/mobile action rows, Typst typing debounce and queued builds, retained previews during syntax errors, backup menus, and saved-token reuse/removal. Browser fixtures inject a temporary file credential store; they never access real Keychain entries. Backend checks cover account isolation and credential persistence, with no live GitHub writes.
 
 Bundled starters live under `templates/`; `project_templates.py` lists their public metadata and loads only those fixed directories. Keep personal source out of this catalog. Preserve upstream notices and update recorded hashes deliberately when replacing Touying or the NeurIPS author kit. The release checker permits only the original upstream author contact in each specific attribution file, and the Western logo as a reviewed template image.
 

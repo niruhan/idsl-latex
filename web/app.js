@@ -1,12 +1,17 @@
 import {escapeHTML as esc,renderVisual,renderTypstVisual} from './visual.js';
 const $=id=>document.getElementById(id);
-const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',documentMode:'source',assetUrl:null,dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,githubToken:'',backupAuto:false};
+const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',documentMode:'source',assetUrl:null,dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,keepPreview:false,githubToken:'',githubSaved:false,backupAuto:false};
 const Home={visible:false,projects:[],folders:[],templates:[],folder:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
 const FileTree={projects:new Map(),searchKey:null,searchCollapsed:new Set()};
-let saveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false,navigationId=0;const backupTimers=new Map();
+let movingFiles=false,saveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false,startingBuild=false,navigationId=0;const backupTimers=new Map();
 const isTypst=()=>S.file?.path.endsWith('.typ');
 const isDocument=()=>/\.(tex|typ)$/.test(S.file?.path||'');
-function scheduleCompile(){clearTimeout(autoTimer);if(!$('autoCompile').checked||!editable())return;if(S.building){compileAgain=true;return;}autoTimer=setTimeout(()=>compile().catch(fail),900);}
+const typstProject=()=>Boolean(S.project?.main.endsWith('.typ'));
+function scheduleCompile(){
+ clearTimeout(autoTimer);if(!$('autoCompile').checked||!editable())return;
+ if(S.building||startingBuild){if(S.dirty)compileAgain=true;return;}
+ autoTimer=setTimeout(()=>compile({automatic:true}).catch(fail),typstProject()?150:900);
+}
 const apiPath=(action='')=>'/api/projects/'+S.project.id+(action?'/'+action:'');
 async function api(path,method='GET',body){
  const response=await fetch(path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
@@ -20,7 +25,7 @@ function closeModal(){$('modal').close();}
 function draftKey(){return `labtex-draft:${S.user?.id}:${S.project?.id}:${S.file?.path}`;}
 function keepDraft(){if(S.file&&S.dirty){try{sessionStorage.setItem(draftKey(),JSON.stringify({content:S.text,revision:S.file.revision}));}catch{toast('Browser draft storage is full. Save or download your draft.');}}}
 function markSaved(label,kind=''){$('saveStatus').textContent=label;$('saveStatus').className='save-status '+kind;}
-function setText(text,fromVisual=false){S.text=text;S.dirty=S.text!==S.saved;markSaved(S.dirty?'Unsaved changes':'All changes saved',S.dirty?'dirty':'');if(!fromVisual){$('code').value=text;highlight();}keepDraft();clearTimeout(saveTimer);if(S.dirty&&!S.conflict)saveTimer=setTimeout(()=>save().catch(fail),800);updateStats();updateBuild();}
+function setText(text,fromVisual=false){S.text=text;S.dirty=S.text!==S.saved;markSaved(S.dirty?'Unsaved changes':'All changes saved',S.dirty?'dirty':'');if(!fromVisual){$('code').value=text;highlight();}keepDraft();clearTimeout(saveTimer);if(S.dirty&&!S.conflict)saveTimer=setTimeout(()=>save().catch(fail),800);updateStats();updateBuild();if(typstProject())scheduleCompile();}
 function highlight(){
  const value=$('code').value;
  $('lineNumbers').textContent=Array.from({length:value.split('\n').length},(_,i)=>i+1).join('\n');
@@ -82,6 +87,28 @@ function revealFile(path){
  for(let depth=1;depth<parts.length;depth++)changed=state.collapsed.delete(parts.slice(0,depth).join('/'))||changed;
  if(changed)rememberFolders(state);
 }
+const fileDragType='application/x-labtex-file';
+function dragProjectFile(element,path,directory=false){
+ element.draggable=Boolean(editable());if(!editable())return;
+ element.addEventListener('dragstart',event=>{event.stopPropagation();event.dataTransfer.setData(fileDragType,JSON.stringify({project:S.project.id,path,directory}));event.dataTransfer.effectAllowed='move';});
+}
+function bindFileDrop(element,folder){
+ element.addEventListener('dragover',event=>{if(!editable()||!event.dataTransfer.types.includes(fileDragType))return;event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect='move';element.classList.add('folder-drop-target');});
+ element.addEventListener('dragleave',event=>{if(!element.contains(event.relatedTarget))element.classList.remove('folder-drop-target');});
+ element.addEventListener('drop',event=>{if(!event.dataTransfer.types.includes(fileDragType))return;event.preventDefault();event.stopPropagation();element.classList.remove('folder-drop-target');let dragged;try{dragged=JSON.parse(event.dataTransfer.getData(fileDragType));}catch{return;}moveProjectFiles(dragged,folder).catch(fail);});
+}
+async function moveProjectFiles(dragged,folder){
+ if(movingFiles)return;
+ if(!editable()||dragged.project!==S.project.id)throw Error('Move files within the same editable project.');
+ movingFiles=true;$('workspace').inert=true;
+ try{
+  const pid=S.project.id;if(!await save()||S.project?.id!==pid)return;const selected=S.file?.path;
+  const project=await api('/api/projects/'+pid);if(S.project?.id!==pid)return;
+  const result=await api('/api/projects/'+pid+'/move-files','POST',{path:dragged.path,directory:dragged.directory,folder,revision:project.revision});
+  if(S.project?.id!==pid)return;
+  await refreshAfterFileChange(pid,result.moves[selected]||selected);toast(result.changed?'Moved. Update references to the old paths.':'Already in this folder.');
+ }finally{movingFiles=false;$('workspace').inert=false;}
+}
 function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toLowerCase();const tree=$('fileTree'),state=folderState();const root={folders:new Map(),files:[]};
  const searchKey=state.key+':'+term;if(FileTree.searchKey!==searchKey){FileTree.searchKey=searchKey;FileTree.searchCollapsed.clear();}
  const collapsed=term?FileTree.searchCollapsed:state.collapsed;
@@ -95,13 +122,13 @@ function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toL
  let folderId=0;
  function renderNode(node,parent){
   for(const file of node.files){
-   const b=document.createElement('button');b.className='tree-file'+(S.file?.path===file.path?' active':'');b.title=file.path;const ext=file.path.split('.').pop();b.innerHTML=`<span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(file.path.split('/').at(-1))}</span>${file.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',()=>loadFile(file.path).catch(fail));b.setAttribute('aria-haspopup','menu');b.setAttribute('aria-controls','fileContextMenu');
+   const b=document.createElement('button');b.className='tree-file'+(S.file?.path===file.path?' active':'');b.title=file.path;const ext=file.path.split('.').pop();b.innerHTML=`<span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(file.path.split('/').at(-1))}</span>${file.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',()=>loadFile(file.path).catch(fail));b.setAttribute('aria-haspopup','menu');b.setAttribute('aria-controls','fileContextMenu');dragProjectFile(b,file.path);
    const contextMenu=event=>{event.preventDefault();const rect=b.getBoundingClientRect();fileMenu({path:file.path,x:event.clientX||rect.left+20,y:event.clientY||rect.bottom,anchor:b}).catch(fail);};
    b.addEventListener('contextmenu',contextMenu);b.addEventListener('keydown',event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10')contextMenu(event);});parent.append(b);
   }
   for(const [name,folder] of node.folders){
    const row=document.createElement('button'),arrow=document.createElement('span'),label=document.createElement('span'),children=document.createElement('div');
-   row.type='button';row.className='tree-folder';row.dataset.folder=folder.path;row.title=folder.path;arrow.setAttribute('aria-hidden','true');label.textContent=name;label.className='filename';row.append(arrow,label);
+   row.type='button';row.className='tree-folder';row.dataset.folder=folder.path;row.title=folder.path;dragProjectFile(row,folder.path,true);bindFileDrop(row,folder.path);arrow.setAttribute('aria-hidden','true');label.textContent=name;label.className='filename';row.append(arrow,label);
    children.className='tree-children';children.id='file-folder-'+folderId++;row.setAttribute('aria-controls',children.id);
    function expanded(value){children.hidden=!value;row.setAttribute('aria-expanded',String(value));row.setAttribute('aria-label',(value?'Collapse ':'Expand ')+folder.path);arrow.textContent=value?'▾':'▸';}
    expanded(!collapsed.has(folder.path));row.addEventListener('click',()=>{const value=children.hidden;if(value)collapsed.delete(folder.path);else collapsed.add(folder.path);if(!term)rememberFolders(state);expanded(value);});
@@ -118,7 +145,7 @@ async function loadFile(path,force=false){if(!force&&(!await save()))return;cons
  if(f.content!==null){let draft;try{draft=JSON.parse(sessionStorage.getItem(draftKey()));}catch{}if(draft&&draft.content!==f.content){S.text=draft.content;S.dirty=true;markSaved('Recovered browser draft','dirty');if(draft.revision!==f.revision){S.conflict=true;await showConflict();}else{toast('Recovered your unsaved draft.');saveTimer=setTimeout(()=>save().catch(fail),1000);}}}
  revealFile(path);editorMode(S.mode);renderFiles();updateStats();
 }
-async function openProject(pid,{historyMode='push'}={}){if(S.project&&!await save())return;const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile','saveButton'])$(id).disabled=!editable();document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable());$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await loadFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path,true);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||(localStorage.getItem('labtex-auto:'+pid)===null&&S.project.main.endsWith('.typ'));$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();if($('autoCompile').checked&&!S.project.build)scheduleCompile();if(!S.invite)setProjectRoute('#project='+pid,historyMode);}
+async function openProject(pid,{historyMode='push'}={}){if(S.project&&!await save())return;const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile','saveButton'])$(id).disabled=!editable();document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable());$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await loadFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path,true);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||(localStorage.getItem('labtex-auto:'+pid)===null&&S.project.main.endsWith('.typ'));$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();if($('autoCompile').checked&&!S.project.build)scheduleCompile();if(!S.invite)setProjectRoute('#project='+pid,historyMode);}
 // A fresh browsing context keeps PDF loads out of page Back/Forward history.
 // Unloading it on the home page also releases the native PDF viewer.
 function replacePdfFrame(src=null){
@@ -130,14 +157,32 @@ function replacePdfFrame(src=null){
 }
 function updateBuild(force=false){if(!S.project)return;const b=S.project.build;const stale=S.dirty||b&&b.revision!==S.project.revision;$('downloadButton').disabled=!b?.success;$('openPdfButton').disabled=!b?.success;if(S.building)return;
  $('buildStatus').textContent=b?(b.success?(stale?'Changes since last build':`Compiled in ${b.seconds}s`):'Build failed'):'Ready to compile';$('buildStatus').className='build-status '+(b&&!b.success?'failed':stale?'stale':'');$('logBadge').textContent=b&&!b.success?'●':'';
- if(b?.success){const key=S.project.id+':'+b.created;if(force||S.pdfKey!==key){S.pdfKey=key;replacePdfFrame(apiPath('pdf')+'?v='+b.created+'#toolbar=0&view=FitH');}$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else{$('pdfEmpty').hidden=false;$('pdfFrame').hidden=true;}
+ if(b?.success){const key=S.project.id+':'+b.created;if(force||S.pdfKey!==key){S.pdfKey=key;replacePdfFrame(apiPath('pdf')+'?v='+b.created+'#toolbar=0&view=FitH');}$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else if(S.keepPreview&&S.pdfKey){$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else{$('pdfEmpty').hidden=false;$('pdfFrame').hidden=true;}
 }
-async function compile(){if(!S.project||S.building||!editable())return;const buildPid=S.project.id;if(!await save()||S.project?.id!==buildPid)return;clearTimeout(autoTimer);S.building=true;$('compileButton').disabled=true;$('firstCompileButton').disabled=true;$('compileButton').querySelector('span').textContent='Compiling…';$('buildStatus').textContent='Building PDF…';$('buildStatus').className='build-status';
- try{const result=await api('/api/projects/'+buildPid+'/compile','POST',{});if(S.project?.id!==buildPid){toast(result.success?'Previous project compiled successfully.':'Previous project build failed. Open its build log for details.');return;}$('buildLog').textContent=result.log;renderDiagnostics(result.log);const project=await api('/api/projects/'+buildPid);if(S.project?.id!==buildPid)return;S.project=project;updateBuild(true);if(!result.success){$('logPanel').hidden=false;toast('Compilation failed. The build log has the details.');}else toast(`PDF compiled in ${result.seconds}s.`);}catch(e){$('buildLog').textContent=e.message;$('logPanel').hidden=false;throw e;}finally{S.building=false;$('compileButton').disabled=!editable();$('firstCompileButton').disabled=!editable();$('compileButton').querySelector('span').textContent='Compile';updateBuild();if(compileAgain){compileAgain=false;scheduleCompile();}}}
+async function compile({automatic=false}={}){
+ if(!S.project||S.building||startingBuild||!editable())return;
+ const buildPid=S.project.id,quiet=automatic&&typstProject();startingBuild=true;
+ try{if(!await save()||S.project?.id!==buildPid)return;}finally{startingBuild=false;}
+ clearTimeout(autoTimer);S.building=true;if(!quiet)S.keepPreview=false;
+ $('compileButton').disabled=true;$('firstCompileButton').disabled=true;$('compileButton').querySelector('span').textContent='Compiling…';$('buildStatus').textContent='Building PDF…';$('buildStatus').className='build-status';
+ try{
+  const result=await api('/api/projects/'+buildPid+'/compile','POST',{});
+  if(S.project?.id!==buildPid){if(!quiet)toast(result.success?'Previous project compiled successfully.':'Previous project build failed. Open its build log for details.');return;}
+  $('buildLog').textContent=result.log;renderDiagnostics(result.log);
+  const project=await api('/api/projects/'+buildPid);if(S.project?.id!==buildPid)return;
+  S.project=project;S.keepPreview=quiet&&!result.success&&Boolean(S.pdfKey);
+  if(!result.success&&!quiet){$('logPanel').hidden=false;toast('Compilation failed. The build log has the details.');}
+  else if(result.success&&!quiet)toast(`PDF compiled in ${result.seconds}s.`);
+ }catch(error){if(S.project?.id===buildPid){$('buildLog').textContent=error.message;if(!quiet)$('logPanel').hidden=false;}if(!quiet)throw error;}
+ finally{
+  S.building=false;$('compileButton').disabled=!editable();$('firstCompileButton').disabled=!editable();$('compileButton').querySelector('span').textContent='Compile';updateBuild();
+  if(compileAgain){compileAgain=false;scheduleCompile();}
+ }
+}
 async function projects({historyMode='push',folder=Home.folder}={}){
  if(S.project&&!await save())return;
  ++navigationId;clearTimeout(autoTimer);
- S.project=null;S.file=null;S.dirty=false;S.pdfKey=null;replacePdfFrame();clearAssetPreview();
+ S.project=null;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;replacePdfFrame();clearAssetPreview();
  $('workspace').hidden=true;$('auth').hidden=true;$('projectHome').hidden=false;
  Home.visible=true;Home.folder=folder;Home.filter='all';$('projectSearch').value='';closeModal();document.title='Projects · IDSL Editor';
  setProjectRoute(projectFolderRoute(folder),historyMode);
@@ -175,10 +220,25 @@ function showProjectFolder(id,historyMode='push'){
  Home.folder=id;Home.filter='all';$('projectSearch').value='';setProjectRoute(projectFolderRoute(id),historyMode);renderProjects();
 }
 function bindProjectDrop(target,folder){
- const type='application/x-labtex-project';
- target.addEventListener('dragover',event=>{if(!event.dataTransfer.types.includes(type))return;event.preventDefault();event.dataTransfer.dropEffect='move';target.classList.add('folder-drop-target');});
+ const projectType='application/x-labtex-project',folderType='application/x-labtex-folder';
+ const accepts=event=>[projectType,folderType].some(type=>event.dataTransfer.types.includes(type));
+ target.addEventListener('dragover',event=>{if(!accepts(event))return;event.preventDefault();event.dataTransfer.dropEffect='move';target.classList.add('folder-drop-target');});
  target.addEventListener('dragleave',event=>{if(!target.contains(event.relatedTarget))target.classList.remove('folder-drop-target');});
- target.addEventListener('drop',event=>{if(!event.dataTransfer.types.includes(type))return;event.preventDefault();event.stopPropagation();target.classList.remove('folder-drop-target');const project=Home.projects.find(project=>project.id===event.dataTransfer.getData(type));if(project)moveProjectToFolder(project,folder).catch(fail);});
+ target.addEventListener('drop',event=>{
+  if(!accepts(event))return;event.preventDefault();event.stopPropagation();target.classList.remove('folder-drop-target');
+  const movingFolder=event.dataTransfer.getData(folderType);
+  if(movingFolder){moveExplorerFolder(movingFolder,folder).catch(fail);return;}
+  const project=Home.projects.find(project=>project.id===event.dataTransfer.getData(projectType));if(project)moveProjectToFolder(project,folder).catch(fail);
+ });
+}
+function dragExplorerFolder(element,id){
+ element.draggable=true;element.addEventListener('dragstart',event=>{event.stopPropagation();event.dataTransfer.setData('application/x-labtex-folder',id);event.dataTransfer.effectAllowed='move';});
+}
+async function moveExplorerFolder(id,parent){
+ const folder=Home.folders.find(folder=>folder.id===id);if(!folder)return;
+ if(id===parent||parent&&folderContains(parent,id))throw Error('A folder cannot be moved inside itself.');
+ if(folder.parent===parent)return;
+ await api('/api/project-folders/'+id,'PUT',{parent});await refreshProjects();toast('Folder moved.');
 }
 function projectFolderLink(link,id){
  link.href=projectFolderRoute(id);link.addEventListener('click',event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();showProjectFolder(id);});bindProjectDrop(link,id);
@@ -188,9 +248,10 @@ function renderProjectFolders(){
  for(const folder of [...Home.folders].sort((a,b)=>projectFolderPath(a.id).localeCompare(projectFolderPath(b.id)))){
   const link=document.createElement('a');link.className='home-folder-link';link.dataset.folder=folder.id;link.title=projectFolderPath(folder.id);link.style.setProperty('--folder-depth',projectFolderChain(folder.id).length-1);
   const icon=document.createElement('span'),name=document.createElement('span');icon.textContent='▱';icon.setAttribute('aria-hidden','true');name.textContent=folder.name;link.append(icon,name);
-  if(Home.folder===folder.id){link.classList.add('active');link.setAttribute('aria-current','page');}projectFolderLink(link,folder.id);nav.append(link);
+  if(Home.folder===folder.id){link.classList.add('active');link.setAttribute('aria-current','page');}projectFolderLink(link,folder.id);dragExplorerFolder(link,folder.id);nav.append(link);
  }
  $('noProjectFolders').hidden=Home.folders.length>0;$('folderLocation').hidden=!Home.folder;
+ $('projectSearch').placeholder=Home.folder?'Search this folder…':'Search projects…';
  const breadcrumbs=$('folderBreadcrumbs');breadcrumbs.replaceChildren();
  for(const folder of [{id:null,name:'All projects'},...projectFolderChain(Home.folder)]){
   if(breadcrumbs.childNodes.length){const separator=document.createElement('span');separator.textContent='›';separator.setAttribute('aria-hidden','true');breadcrumbs.append(separator);}
@@ -266,7 +327,7 @@ function renderProjects(){
  const list=$('projectList');list.replaceChildren();
  for(const folder of folders){
   const link=document.createElement('a');link.className='project-directory';link.dataset.folder=folder.id;const count=Home.projects.filter(project=>folderContains(project.folder,folder.id)).length;
-  link.innerHTML=`<div class="directory-cover" aria-hidden="true"><svg viewBox="0 0 64 52" fill="none"><path d="M5 12V7a3 3 0 0 1 3-3h17l7 8h24a3 3 0 0 1 3 3v29a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V12Z" fill="currentColor" opacity=".18"/><path d="M5 18v-11a3 3 0 0 1 3-3h17l7 8h24a3 3 0 0 1 3 3v29a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V18h54" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg></div><div class="directory-details"><h2>${esc(folder.name)}</h2><p>${count} project${count===1?'':'s'} <span aria-hidden="true">→</span></p></div>`;link.title=projectFolderPath(folder.id);projectFolderLink(link,folder.id);list.append(link);
+  link.innerHTML=`<div class="directory-cover" aria-hidden="true"><svg viewBox="0 0 64 52" fill="none"><path d="M5 12V7a3 3 0 0 1 3-3h17l7 8h24a3 3 0 0 1 3 3v29a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V12Z" fill="currentColor" opacity=".18"/><path d="M5 18v-11a3 3 0 0 1 3-3h17l7 8h24a3 3 0 0 1 3 3v29a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V18h54" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg></div><div class="directory-details"><h2>${esc(folder.name)}</h2><p>${count} project${count===1?'':'s'} <span aria-hidden="true">→</span></p></div>`;link.title=projectFolderPath(folder.id);projectFolderLink(link,folder.id);dragExplorerFolder(link,folder.id);list.append(link);
  }
  for(const project of matches){
   const typst=project.main.endsWith('.typ');
@@ -350,7 +411,7 @@ async function authenticate(){
  const session=await api('/api/session');S.user=session.user;S.demo=session.demo;S.canInviteLab=session.canInviteLab;
  if(!S.user){$('auth').hidden=false;$('workspace').hidden=true;$('projectHome').hidden=true;Home.visible=false;S.authMode=session.needsSetup?'setup':S.signup?'register':'login';renderAuth();return;}
  $('auth').hidden=true;
- $('accountButton').textContent=S.user.name.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();$('homeAccountButton').textContent=$('accountButton').textContent;$('homeUserName').textContent=S.user.name;
+ $('accountButton').textContent=S.user.name.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();$('homeAccountButton').textContent=$('accountButton').textContent;
  $('previewLabel').textContent=S.demo?'LOCAL PREVIEW · Use normal mode for lab accounts':'IDSL Editor · LaTeX + Typst';
  let pid=new URLSearchParams(location.hash.slice(1)).get('project');
  if(S.invite&&!S.demo){const joined=await api('/api/join','POST',{token:S.invite});pid=joined.id;S.invite=null;history.replaceState(null,'','#project='+pid);toast('You joined the project.');}
@@ -387,6 +448,7 @@ window.addEventListener('hashchange',async()=>{
   else if(S.user&&!params.has('project'))await projects({historyMode:'none',folder:params.get('folder')});
  }catch(e){fail(e);}
 });
+bindFileDrop($('fileRootDrop'),null);
 action('closeModal',closeModal);action('projectsButton',projects);action('projectsNavButton',projects);action('sourceTab',()=>editorMode('source'));action('visualTab',()=>editorMode('visual'));action('saveButton',save);action('compileButton',compile);action('firstCompileButton',compile);action('shareButton',share);action('backupButton',backupDialog);action('historyButton',historyDialog);action('newFileButton',addFile);action('fileMenuButton',fileMenu);action('uploadButton',()=>$('uploadFiles').click());
 action('downloadButton',()=>{if(S.project?.build?.success)location.href=apiPath('pdf')+'?download=1';});action('openPdfButton',()=>{if(S.project?.build?.success)window.open(apiPath('pdf'),'_blank','noopener');});action('exportSourceButton',async()=>{if(await save())location.href=apiPath('source.zip');});action('logButton',async()=>{$('logPanel').hidden=!$('logPanel').hidden;if(!$('logPanel').hidden&&S.project?.build){const log=await api(apiPath('log'));$('buildLog').textContent=log.log;renderDiagnostics(log.log);}});action('closeLog',()=>$('logPanel').hidden=true);
 action('projectTitle',async()=>{if(!editable())return;const name=prompt('Project name',S.project.name);if(!name||name===S.project.name)return;await api(apiPath(),'PUT',{name});S.project=await api(apiPath());$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';});
@@ -404,9 +466,9 @@ function positionAccountMenu(){
 }
 function accountMenu(anchor){
  const menu=$('accountDropdown'),wasOpen=!menu.hidden&&accountAnchor===anchor;closeAccountMenu();if(wasOpen)return;accountAnchor=anchor;
- menu.innerHTML=`<div class="account-menu-heading"><strong>${esc(S.user.name)}</strong><small>${esc(S.user.email)}</small></div><button id="accountProjects" role="menuitem">My projects</button><button id="accountAppearance" role="menuitem">Themes &amp; appearance</button>${S.canInviteLab?'<hr><button id="inviteLabMembers" role="menuitem">Invite lab members</button><button id="approvedEmailsButton" role="menuitem">Approved emails</button>':''}${S.demo?'<p class="hint">Local preview account</p>':'<hr><button id="signOut" role="menuitem">Sign out</button>'}${S.project?.role==='owner'?'<hr><button id="deleteProject" class="danger" role="menuitem">Delete project</button>':''}`;
+ menu.innerHTML=`<div class="account-menu-heading"><strong>${esc(S.user.name)}</strong><small>${esc(S.user.email)}</small></div><button id="accountProjects" role="menuitem">My projects</button><button id="accountAppearance" role="menuitem">Themes &amp; appearance</button><button id="accountBackups" role="menuitem">GitHub backups</button>${S.project?.role==='owner'?'<button id="accountProjectBackup" role="menuitem">Back up this project</button>':''}${S.canInviteLab?'<hr><button id="inviteLabMembers" role="menuitem">Invite lab members</button><button id="approvedEmailsButton" role="menuitem">Approved emails</button>':''}${S.demo?'<p class="hint">Local preview account</p>':'<hr><button id="signOut" role="menuitem">Sign out</button>'}${S.project?.role==='owner'?'<hr><button id="deleteProject" class="danger" role="menuitem">Delete project</button>':''}`;
  function item(id,fn){action(id,()=>{closeAccountMenu();return fn();});}
- item('accountProjects',projects);item('accountAppearance',appearanceDialog);
+ item('accountProjects',projects);item('accountAppearance',appearanceDialog);item('accountBackups',allBackupsDialog);if(S.project?.role==='owner')item('accountProjectBackup',backupDialog);
  if(S.canInviteLab){item('inviteLabMembers',labSignupDialog);item('approvedEmailsButton',approvedEmailsDialog);}
  if(!S.demo)item('signOut',async()=>{if(!await save())return;await api('/api/logout','POST',{});for(const key of Object.keys(sessionStorage))if(key.startsWith('labtex-draft:'+S.user.id+':'))sessionStorage.removeItem(key);location.href='/';});
  if(S.project?.role==='owner')item('deleteProject',async()=>{if(prompt('Type the project name to permanently delete it:')!==S.project.name)return;await api(apiPath(),'DELETE',{});S.project=null;S.file=null;S.dirty=false;history.replaceState(null,'','/');location.reload();});
@@ -425,7 +487,7 @@ $('importZip').addEventListener('change',async e=>{try{const file=e.target.files
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save().catch(fail);}if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();compile().catch(fail);}});
 window.addEventListener('beforeunload',e=>{if(S.dirty||S.saving){keepDraft();e.preventDefault();e.returnValue='';}});
 const handle=$('splitHandle');handle.addEventListener('pointerdown',e=>{handle.setPointerCapture(e.pointerId);handle.dataset.drag='1';});handle.addEventListener('pointermove',e=>{if(!handle.dataset.drag)return;const r=$('workbench').getBoundingClientRect();const percent=Math.max(25,Math.min(75,(e.clientX-r.left)/r.width*100));$('workbench').style.gridTemplateColumns=`minmax(200px,${percent}fr) 6px minmax(200px,${100-percent}fr)`;});handle.addEventListener('pointerup',()=>delete handle.dataset.drag);handle.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const p=Math.max(25,Math.min(75,Number(handle.dataset.percent||50)+(e.key==='ArrowRight'?5:-5)));handle.dataset.percent=p;$('workbench').style.gridTemplateColumns=`minmax(200px,${p}fr) 6px minmax(200px,${100-p}fr)`;}});
-setInterval(async()=>{if(!S.project||!S.user||pollBusy||S.building||document.hidden)return;pollBusy=true;try{const pid=S.project.id;const p=await api('/api/projects/'+pid);if(S.project?.id!==pid)return;$('connectionStatus').textContent='Connected';if(!S.dirty&&!S.saving&&!S.conflict){const f=p.files.find(f=>f.path===S.file?.path);if(!f){S.project=p;await loadFile(p.main,true);}else if(f.revision!==S.file.revision){S.project=p;await loadFile(f.path,true);toast('File updated by a coauthor.');}}if(S.project?.id!==pid)return;S.project=p;$('projectTitle').textContent=p.name;renderFiles();updateBuild();}catch(e){$('connectionStatus').textContent=e.status===401?'Session expired':'Connection interrupted';if(e.status===401)markSaved('Sign in again to save','error');}finally{pollBusy=false;}},4000);
+setInterval(async()=>{if(!S.project||!S.user||pollBusy||movingFiles||S.building||document.hidden)return;pollBusy=true;try{const pid=S.project.id;const p=await api('/api/projects/'+pid);if(S.project?.id!==pid||movingFiles)return;$('connectionStatus').textContent='Connected';if(!S.dirty&&!S.saving&&!S.conflict){const f=p.files.find(f=>f.path===S.file?.path);if(!f){S.project=p;await loadFile(p.main,true);}else if(f.revision!==S.file.revision){S.project=p;await loadFile(f.path,true);toast('File updated by a coauthor.');}}if(S.project?.id!==pid)return;S.project=p;$('projectTitle').textContent=p.name;renderFiles();updateBuild();}catch(e){$('connectionStatus').textContent=e.status===401?'Session expired':'Connection interrupted';if(e.status===401)markSaved('Sign in again to save','error');}finally{pollBusy=false;}},4000);
 authenticate().catch(fail);
 
 function renderDiagnostics(log){
@@ -440,13 +502,45 @@ function renderDiagnostics(log){
 
 function scheduleBackup(pid){
  clearTimeout(backupTimers.get(pid));
- if(!S.backupAuto||!S.githubToken||S.project?.role!=='owner')return;
- backupTimers.set(pid,setTimeout(async()=>{backupTimers.delete(pid);if(!S.backupAuto||!S.githubToken)return;try{await api('/api/projects/'+pid+'/backup','POST',{token:S.githubToken});toast('GitHub backup is up to date.');}catch(e){S.backupAuto=false;for(const timer of backupTimers.values())clearTimeout(timer);backupTimers.clear();toast('Automatic backup paused: '+e.message);}},30000));
+ if(!S.backupAuto||!(S.githubToken||S.githubSaved)||S.project?.role!=='owner')return;
+ backupTimers.set(pid,setTimeout(async()=>{backupTimers.delete(pid);if(!S.backupAuto||!(S.githubToken||S.githubSaved))return;try{await api('/api/projects/'+pid+'/backup','POST',{token:S.githubToken});toast('GitHub backup is up to date.');}catch(e){S.backupAuto=false;for(const timer of backupTimers.values())clearTimeout(timer);backupTimers.clear();toast('Automatic backup paused: '+e.message);}},30000));
+}
+function tokenControls(prefix,credential){
+ return `<p class="hint">Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub access token</a> with <strong>Contents: Read and write</strong> for your backup repositories.</p><label class="backup-check"><input id="${prefix}Remember" type="checkbox" checked> Remember token for future sessions</label><p id="${prefix}TokenStatus" class="hint">${credential.saved?'A token is saved in '+esc(credential.storage)+'. Leave the field blank to reuse it.':'Remembered tokens are kept in '+esc(credential.storage)+', never in browser storage.'}</p><button id="${prefix}Forget" type="button" class="text-button" ${credential.saved?'':'hidden'}>Forget saved token</button>`;
+}
+function bindTokenControls(prefix,credential){
+ S.githubSaved=credential.saved;$(prefix+'Token').value=S.githubToken;
+ if(credential.saved)$(prefix+'Token').placeholder='Saved token · leave blank to reuse';
+ action(prefix+'Forget',async()=>{const result=await api('/api/github-token','DELETE',{});S.githubSaved=result.saved;S.githubToken='';$(prefix+'Token').value='';$(prefix+'Token').placeholder='Fine-grained token with Contents read/write';$(prefix+'Forget').hidden=true;$(prefix+'TokenStatus').textContent='Saved token removed from this app. This does not revoke it on GitHub.';});
+}
+async function saveGitHubToken(prefix){
+ const token=$(prefix+'Token').value.trim();
+ if(token){
+  if($(prefix+'Remember').checked){
+   const result=await api('/api/github-token','PUT',{token});S.githubSaved=result.saved;S.githubToken='';$(prefix+'Token').value='';$(prefix+'Token').placeholder='Saved token · leave blank to reuse';$(prefix+'Forget').hidden=false;$(prefix+'TokenStatus').textContent='Token saved in '+result.storage+'. It will be reused after signing in again.';
+  }else S.githubToken=token;
+ }
+}
+async function allBackupsDialog(){
+ if(!await save())return;const [defaults,credential]=await Promise.all([api('/api/backup-settings'),api('/api/github-token')]);
+ modal('Back up all projects',`<p>Back up every project you own into one GitHub repository. Each project gets its own folder. Shared projects owned by someone else are excluded. Use a private repository for private documents.</p><form id="allBackupsForm"><label>Shared GitHub repository<input id="allBackupRepo" placeholder="your-name/research-documents" value="${esc(defaults.repository)}" required></label><label>Branch<input id="allBackupBranch" placeholder="Default branch" value="${esc(defaults.branch)}"></label><label>GitHub access token<input id="allBackupToken" type="password" autocomplete="off" placeholder="Fine-grained token with Contents read/write"></label>${tokenControls('allBackup',credential)}<p class="hint">Create the repository on GitHub first. Project-specific repository settings are preserved.</p><div class="actions"><button id="saveAllBackupSettings" type="button" class="outline">Save settings</button><button id="runAllBackups" class="primary">Back up all to this repository</button></div></form><div id="allBackupResult" class="backup-result" role="status">Ready to back up your owned projects.</div>`);
+ bindTokenControls('allBackup',credential);
+ async function settings(){await api('/api/backup-settings','PUT',{repository:$('allBackupRepo').value,branch:$('allBackupBranch').value});await saveGitHubToken('allBackup');}
+ action('saveAllBackupSettings',async()=>{await settings();$('allBackupResult').textContent='Shared repository settings saved.';});
+ $('allBackupsForm').addEventListener('submit',async event=>{
+  event.preventDefault();const button=$('runAllBackups'),saveButton=$('saveAllBackupSettings'),result=$('allBackupResult');if(button.disabled)return;button.disabled=true;saveButton.disabled=true;result.classList.remove('error');
+  try{
+   await settings();if(!(S.githubToken||S.githubSaved))throw Error('Enter your GitHub token first.');result.textContent='Backing up your owned projects…';
+   const response=await api('/api/backups','POST',{token:S.githubToken,sharedOnly:true});result.replaceChildren();
+   if(!response.results.length)result.textContent='You do not own any projects to back up.';
+   for(const item of response.results){const line=document.createElement('div');if(item.error){line.textContent=item.name+': '+item.error;result.classList.add('error');}else{const link=document.createElement('a');link.href=item.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=item.name+': '+(item.changed?'Snapshot saved':'Already up to date')+' → '+item.repository;line.append(link);}result.append(line);}
+  }catch(error){result.textContent=error.message;result.classList.add('error');}finally{button.disabled=false;saveButton.disabled=false;}
+ });
 }
 async function backupDialog(){
  if(!S.project||S.project.role!=='owner')return;
  if(!await save())return;
- const [defaults,project]=await Promise.all([api('/api/backup-settings'),api(apiPath('backup-settings'))]);
+ const [defaults,project,credential]=await Promise.all([api('/api/backup-settings'),api(apiPath('backup-settings')),api('/api/github-token')]);
  modal('GitHub backups',`<p>Keep your project source and assets in GitHub, with commit history. Local accounts, passwords, and build files stay on this computer. Use a private repository for private documents.</p>
  <form id="backupForm"><div class="backup-options">
  <label>My shared repository<input id="backupSharedRepo" placeholder="your-name/research-documents" value="${esc(defaults.repository)}"></label>
@@ -455,25 +549,25 @@ async function backupDialog(){
  <div id="separateBackup"><label>Project repository<input id="backupProjectRepo" placeholder="your-name/this-paper" value="${esc(project.repository)}"></label><label>Project branch<input id="backupProjectBranch" placeholder="Default branch" value="${esc(project.branch)}"></label></div>
  <p id="backupPath" class="hint backup-destination"></p>
  <label>GitHub access token<input id="backupToken" type="password" autocomplete="off" placeholder="Fine-grained token with Contents read/write"></label>
- <p class="hint">Create the repository on GitHub first. Grant your <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">fine-grained token</a> Contents read/write access to it. The token stays in memory until this tab reloads; it is never saved to the database or browser storage.</p>
+ ${tokenControls('backup',credential)}
  <label class="backup-check"><input id="backupAuto" type="checkbox"> Back up 30 seconds after saving while this tab is open</label>
  </div><div class="row"><button type="submit" class="outline">Save settings</button><button type="button" id="backupCurrent" class="primary">Back up this project</button><button type="button" id="backupAll" class="outline">Back up all my projects</button></div></form>
  <div id="backupResult" class="backup-result" role="status">${project.last_url?`Last snapshot: <a href="${esc(project.last_url)}" target="_blank" rel="noopener noreferrer">${esc(project.last_commit.slice(0,8))}</a> · revision ${project.last_revision}`:'No GitHub snapshot recorded for this project yet.'}</div>`);
- $('backupMode').value=project.mode;$('backupToken').value=S.githubToken;$('backupAuto').checked=S.backupAuto;
+ $('backupMode').value=project.mode;bindTokenControls('backup',credential);$('backupAuto').checked=S.backupAuto;
  function layout(){const shared=$('backupMode').value==='shared';$('separateBackup').hidden=shared;$('backupPath').textContent=shared?'Sources go in projects/'+S.project.id+'/; other projects keep their own folders.':'Sources go at the repository root. Existing unrelated files are preserved.';}
  layout();$('backupMode').addEventListener('change',layout);
  async function saveSettings(){
   await api('/api/backup-settings','PUT',{repository:$('backupSharedRepo').value,branch:$('backupSharedBranch').value});
   await api(apiPath('backup-settings'),'PUT',{mode:$('backupMode').value,repository:$('backupProjectRepo').value,branch:$('backupProjectBranch').value});
-  S.githubToken=$('backupToken').value.trim();S.backupAuto=$('backupAuto').checked;
-  if(S.backupAuto&&!S.githubToken){S.backupAuto=false;throw Error('Enter a token to enable automatic backups for this tab.');}
+  await saveGitHubToken('backup');S.backupAuto=$('backupAuto').checked;
+  if(S.backupAuto&&!(S.githubToken||S.githubSaved)){S.backupAuto=false;throw Error('Enter a token or reuse a saved token to enable automatic backups for this tab.');}
   if(!S.backupAuto){for(const timer of backupTimers.values())clearTimeout(timer);backupTimers.clear();}
  }
  $('backupForm').addEventListener('submit',async event=>{event.preventDefault();try{await saveSettings();$('backupResult').textContent='Backup settings saved. Back up now to create a snapshot.';}catch(e){$('backupResult').textContent=e.message;}});
  async function run(all){
   $('backupCurrent').disabled=true;$('backupAll').disabled=true;$('backupResult').classList.remove('error');
   try{
-   await saveSettings();if(!S.githubToken)throw Error('Enter your GitHub token first.');
+   await saveSettings();if(!(S.githubToken||S.githubSaved))throw Error('Enter your GitHub token first.');
    $('backupResult').textContent=all?'Backing up your owned projects…':'Creating GitHub snapshot…';
    const result=await api(all?'/api/backups':apiPath('backup'),'POST',{token:S.githubToken});
    const results=all?result.results:[result];$('backupResult').replaceChildren();
@@ -485,8 +579,12 @@ async function backupDialog(){
 
 // The project explorer is a page, with browser-history navigation to editors.
 action('createProject',newProject);action('emptyNewProject',newProject);action('importProject',()=>$('importZip').click());action('refreshProjects',refreshProjects);
+action('upProjectFolder',()=>showProjectFolder(Home.folders.find(folder=>folder.id===Home.folder)?.parent||null));action('rootProjectFolder',()=>showProjectFolder(null));
 action('createProjectFolder',()=>projectFolderDialog());action('sidebarNewFolder',()=>projectFolderDialog());action('manageProjectFolder',()=>projectFolderDialog(Home.folders.find(folder=>folder.id===Home.folder)));
-bindProjectDrop(document.querySelector('[data-project-filter="all"]'),null);
+bindProjectDrop(document.querySelector('[data-project-filter="all"]'),null);bindProjectDrop($('rootProjectFolder'),null);
+$('upProjectFolder').addEventListener('dragover',event=>{if(!Array.from(event.dataTransfer.types).some(type=>['application/x-labtex-project','application/x-labtex-folder'].includes(type)))return;event.preventDefault();event.dataTransfer.dropEffect='move';$('upProjectFolder').classList.add('folder-drop-target');});
+$('upProjectFolder').addEventListener('dragleave',()=>$('upProjectFolder').classList.remove('folder-drop-target'));
+$('upProjectFolder').addEventListener('drop',event=>{event.preventDefault();$('upProjectFolder').classList.remove('folder-drop-target');const parent=Home.folders.find(folder=>folder.id===Home.folder)?.parent||null,id=event.dataTransfer.getData('application/x-labtex-folder');if(id)moveExplorerFolder(id,parent).catch(fail);else{const project=Home.projects.find(project=>project.id===event.dataTransfer.getData('application/x-labtex-project'));if(project)moveProjectToFolder(project,parent).catch(fail);}});
 action('browseTemplates',templateLibrary);
 $('projectSearch').addEventListener('input',renderProjects);
 $('projectSort').addEventListener('change',()=>{Home.sort=$('projectSort').value;renderProjects();});

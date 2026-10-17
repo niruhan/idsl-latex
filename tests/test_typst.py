@@ -97,5 +97,37 @@ class TypstTests(unittest.TestCase):
             self.assertEqual(len(result['results']), 2)
             self.assertIn('error', result['results'][1])
 
+    def test_backup_all_to_one_repository_preserves_separate_settings_and_is_owner_only(self):
+        self.create()
+        self.invite('viewer')
+        self.owner.call('/api/backup-settings','PUT',{'repository':'example/all-documents'})
+        self.owner.call(self.base+'/backup-settings','PUT',{'mode':'separate','repository':'example/separate'})
+        before=self.owner.call(self.base+'/backup-settings')[1]
+        with patch('server.backup_snapshot',return_value={'changed':True,'commit':'a'*40,'url':'https://github.com/example/all-documents/commit/'+'a'*40}) as snapshot:
+            status,result=self.owner.call('/api/backups','POST',{'token':'test-token-in-memory','sharedOnly':True})
+        self.assertEqual(status,200,result)
+        owned={p['id'] for p in self.owner.call('/api/projects')[1]['projects'] if p['role']=='owner'}
+        self.assertEqual({item['id'] for item in result['results']},owned)
+        self.assertEqual(snapshot.call_count,len(owned))
+        for call in snapshot.call_args_list:
+            self.assertEqual(call.args[1]['repository'],'example/all-documents')
+            self.assertTrue(call.args[4])
+        self.assertEqual(self.owner.call(self.base+'/backup-settings')[1],before)
+        self.assertEqual(self.owner.call('/api/backups','POST',{'token':'test-token-in-memory','sharedOnly':'yes'})[0],400)
+        with self.app.db() as db:self.assertNotIn('test-token-in-memory','\n'.join(db.iterdump()))
+
+    def test_bulk_shared_repository_is_bound_before_network_requests(self):
+        self.create()
+        self.owner.call('/api/backup-settings','PUT',{'repository':'example/original'})
+        calls=[]
+        def snapshot(client,target,project,files,shared):
+            calls.append(target['repository'])
+            self.owner.call('/api/backup-settings','PUT',{'repository':'example/changed-during-backup'})
+            return {'changed':True,'commit':'b'*40,'url':'https://github.com/example/original/commit/'+'b'*40}
+        with patch('server.backup_snapshot',side_effect=snapshot):
+            status,result=self.owner.call('/api/backups','POST',{'token':'test-token-in-memory','sharedOnly':True})
+        self.assertEqual(status,200,result)
+        self.assertEqual(calls,['example/original']*2)
+
 
 if __name__ == '__main__': unittest.main()

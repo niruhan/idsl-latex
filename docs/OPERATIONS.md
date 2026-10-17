@@ -35,7 +35,7 @@ The command uses SQLite's online backup API for consistency and creates the resu
 
 ## Project source backups on GitHub
 
-Project owners configure source backups from **Backup** inside the editor. A shared repository uses a folder per project; a separate repository uses its root. GitHub snapshots retain source/assets and a project manifest, while the SQLite backup above retains accounts, history, membership, and PDFs. Both may be useful. Tokens are held only in tab memory; automatic GitHub backups stop after closing/reloading the tab until configured again. See [GitHub backup and restoration steps](LOCAL.md#github-backups).
+Project owners configure source backups from **Backup** inside the editor. A shared repository uses a folder per project; a separate repository uses its root. GitHub snapshots retain source/assets and a project manifest, while the SQLite backup above retains accounts, history, membership, and PDFs. Both may be useful. Remembered tokens use macOS Keychain or private Linux credential files, separately from SQLite. Moving an installation or restoring only its database may require saving the token again. Use **Forget saved token** before removing an installation; revoke unwanted tokens on GitHub as well. Automatic GitHub backups stop after closing/reloading the tab until enabled again; saved tokens remain reusable. See [GitHub backup and restoration steps](LOCAL.md#github-backups).
 
 The Typst sample is a regular option under **More templates**. Each chosen copy is private to its owner and counts toward the project limit. Home visits create nothing automatically and preserve existing samples. Deleting a copy does not recreate it.
 

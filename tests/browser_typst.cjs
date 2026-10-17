@@ -85,7 +85,7 @@ const output = process.env.TEST_OUTPUT || path.join(process.cwd(), 'artifacts');
   });
   await page.locator('#backupButton').click();
   await page.locator('#backupSharedRepo').fill('example/all-documents');
-  await page.locator('#backupToken').fill('test-token-in-memory');
+  await page.locator('#backupToken').fill('test-token-in-memory');await page.locator('#backupRemember').uncheck();
   await page.locator('#backupCurrent').click();
   await page.locator('#backupResult').getByText(/Snapshot saved/).waitFor();
   assert.equal(backups,1);

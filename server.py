@@ -9,6 +9,7 @@ from pathlib import Path
 from core import Problem, MAX_FILE, MAX_PROJECT, MAX_FILES, SAMPLE, TYPST_SAMPLE, safe_path, pack_zip, unpack_zip, compile_project, starter_files, main_document
 from github_backup import destination, GitHub, backup_snapshot
 from project_templates import TEMPLATES, template_files
+from credential_store import token_store, valid_token
 ROOT=Path(__file__).resolve().parent
 MAX_OWNED_PROJECTS=25
 MAX_PROJECT_FOLDERS=100
@@ -16,6 +17,12 @@ MAX_FOLDER_DEPTH=10
 MAX_HISTORY=40*1024*1024
 PUBLIC_POSTS={'/api/setup','/api/login','/api/register-lab'}
 JSON_STRUCTURE=re.compile(r'[",\[\]{}]')
+
+def export_disposition(project_name, extension, attachment=True):
+    name=re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', '-', project_name).strip(' .') or 'document'
+    filename=name if name.lower().endswith(extension) else name+extension
+    fallback=filename.encode('ascii','replace').decode().replace('?', '_')
+    return ('attachment' if attachment else 'inline')+'; filename="'+fallback+'"; filename*=UTF-8\'\''+urllib.parse.quote(filename,safe='')
 
 class BoundedHTTPServer(ThreadingHTTPServer):
     daemon_threads=True
@@ -55,6 +62,7 @@ class App:
     def __init__(self,data,origin,compiler_url=None,demo=False):
         self.data=Path(data).resolve(); self.data.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.path=self.data/'labtex.sqlite3'; self.origin=origin.rstrip('/'); self.compiler_url=compiler_url; self.demo=demo
+        self.tokens=token_store(self.data)
         self.setup_token=os.getenv('SETUP_TOKEN') or secrets.token_urlsafe(24)
         self.lock=threading.Lock(); self.jobs=set(); self.attempts={}
         with self.db() as db:
@@ -147,6 +155,40 @@ CREATE INDEX IF NOT EXISTS project_locations_folder ON project_locations(user_id
         if (write and row['role']=='viewer') or (owner and row['role']!='owner'): raise Problem('You do not have permission for this action.',403)
         return dict(row)
     def touch(self,db,pid): db.execute('UPDATE projects SET revision=revision+1,updated=? WHERE id=?',(time.time(),pid))
+    def move_files(self,db,project,data):
+        """Move a file or virtual directory atomically, including history and main."""
+        pid=project['id'];source=safe_path(data.get('path'))
+        if type(data.get('directory')) is not bool: raise Problem('Choose a file or folder to move.')
+        destination=data.get('folder')
+        if destination not in (None,''): destination=safe_path(destination)
+        else: destination=''
+        if data.get('revision')!=project['revision']: raise Problem('Project changed. Refresh and try moving again.',409)
+        files={row['path'] for row in db.execute('SELECT path FROM files WHERE project_id=?',(pid,))}
+        directory=data['directory']
+        selected=sorted(path for path in files if path.startswith(source+'/')) if directory else [source] if source in files else []
+        if not selected: raise Problem('File or folder not found.',404)
+        if destination and not any(path.startswith(destination+'/') for path in files): raise Problem('Destination folder not found.',404)
+        if directory and (destination==source or destination.startswith(source+'/')): raise Problem('A folder cannot be moved inside itself.',409)
+        target=(destination+'/' if destination else '')+source.rsplit('/',1)[-1]
+        moves={path:safe_path(target+path[len(source):]) for path in selected}
+        if all(old==new for old,new in moves.items()): return {'moves':moves,'changed':False}
+        # Reject merging directories as well as overwriting individual files.
+        if target in files or any(path.startswith(target+'/') for path in files-set(selected)):
+            raise Problem('A file or folder already exists at the destination.',409)
+        remaining=files-set(selected)
+        for new in moves.values():
+            if new in remaining or any(new.startswith(path+'/') or path.startswith(new+'/') for path in remaining):
+                raise Problem('A file or folder already exists at the destination.',409)
+        temporary='_move_'+secrets.token_hex(16)+'/'
+        for old in selected:
+            db.execute('UPDATE files SET path=? WHERE project_id=? AND path=?',(temporary+old,pid,old))
+            db.execute('UPDATE history SET path=? WHERE project_id=? AND path=?',(temporary+old,pid,old))
+        for old,new in moves.items():
+            db.execute('UPDATE files SET path=?,revision=revision+1 WHERE project_id=? AND path=?',(new,pid,temporary+old))
+            db.execute('UPDATE history SET path=? WHERE project_id=? AND path=?',(new,pid,temporary+old))
+        if project['main'] in moves: db.execute('UPDATE projects SET main=? WHERE id=?',(moves[project['main']],pid))
+        self.touch(db,pid)
+        return {'moves':moves,'changed':True}
     def is_lab_admin(self,db,user):
         row=db.execute("SELECT value FROM settings WHERE key='lab_admin_id'").fetchone()
         return bool(user and not self.demo and row and row['value']==user['id'])
@@ -196,7 +238,7 @@ CREATE INDEX IF NOT EXISTS project_locations_folder ON project_locations(user_id
         finally:
             with self.lock: self.jobs.discard(pid)
 
-    def backup(self,pid,user,token):
+    def backup(self,pid,user,token,shared_target=None):
         key='backup:'+pid
         with self.lock:
             if key in self.jobs: raise Problem('This project is already being backed up.',429)
@@ -206,19 +248,30 @@ CREATE INDEX IF NOT EXISTS project_locations_folder ON project_locations(user_id
                 db.execute('BEGIN')
                 project=self.access(db,pid,user,owner=True)
                 settings=db.execute('SELECT * FROM project_backups WHERE project_id=?',(pid,)).fetchone()
-                shared=not settings or settings['mode']=='shared'
-                target=db.execute('SELECT * FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone() if shared else settings
+                shared=shared_target is not None or not settings or settings['mode']=='shared'
+                target=shared_target if shared_target is not None else db.execute('SELECT * FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone() if shared else settings
                 if not target: raise Problem('Set your GitHub backup destination first.')
                 target=dict(target)
                 files={r['path']:r['content'] for r in db.execute('SELECT path,content FROM files WHERE project_id=?',(pid,))}
             result=backup_snapshot(GitHub(token),target,project,files,shared)
             with self.db() as db:
+                db.execute('BEGIN IMMEDIATE')
                 self.access(db,pid,user,owner=True)
-                db.execute('INSERT INTO project_backups VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET last_commit=excluded.last_commit,last_url=excluded.last_url,last_revision=excluded.last_revision',
-                           (pid,'shared' if shared else 'separate','' if shared else target['repository'],'' if shared else target['branch'],result['commit'],result['url'],project['revision']))
+                current=db.execute('SELECT * FROM project_backups WHERE project_id=?',(pid,)).fetchone()
+                current_shared=not current or current['mode']=='shared'
+                current_target=db.execute('SELECT * FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone() if current_shared else current
+                # Record the result only against the destination it actually used.
+                if current_shared==shared and current_target and all(current_target[key]==target[key] for key in ('repository','branch')):
+                    db.execute('INSERT INTO project_backups VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET last_commit=excluded.last_commit,last_url=excluded.last_url,last_revision=excluded.last_revision',
+                               (pid,'shared' if shared else 'separate','' if shared else target['repository'],'' if shared else target['branch'],result['commit'],result['url'],project['revision']))
             return {**result,'revision':project['revision'],'name':project['name']}
         finally:
             with self.lock: self.jobs.discard(key)
+
+    def backup_token(self,user,value):
+        token=value or self.tokens.get(user['id'])
+        if not token: raise Problem('Enter and save your GitHub token first.')
+        return valid_token(token)
 
 class Handler(BaseHTTPRequestHandler):
     server_version='LabTeX'
@@ -307,20 +360,36 @@ class Handler(BaseHTTPRequestHandler):
             import traceback; traceback.print_exc(); self.send({'error':'The server could not complete this request.'},500)
     def route(self,method,path,query,data):
         app=self.app
+        if path=='/api/github-token':
+            with app.db() as db: user=self.user(db)
+            if app.demo: raise Problem('Saving GitHub tokens is disabled in local preview.',403)
+            if method=='PUT': app.tokens.set(user['id'],valid_token(data.get('token')))
+            elif method=='DELETE': app.tokens.delete(user['id'])
+            elif method!='GET': raise Problem('Not found.',404)
+            return {'saved':app.tokens.has(user['id']),'storage':app.tokens.label}
         if path=='/api/backups' and method=='POST':
+            shared_only=data.get('sharedOnly',False)
+            if type(shared_only) is not bool: raise Problem('Choose a valid backup layout.')
             with app.db() as db:
                 user=self.user(db)
                 projects=[dict(r) for r in db.execute('SELECT id,name FROM projects WHERE owner=? ORDER BY id',(user['id'],))]
+                shared_target=None
+                if shared_only:
+                    target=db.execute('SELECT * FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone()
+                    if not target or not target['repository']: raise Problem('Set your shared GitHub repository first.')
+                    shared_target=dict(target)
+            token=app.backup_token(user,data.get('token'))
             results=[]
             for project in projects:
                 pid=project['id']
-                try: results.append({'id':pid,**app.backup(pid,user,data.get('token'))})
+                try: results.append({'id':pid,**app.backup(pid,user,token,shared_target)})
                 except Problem as error: results.append({'id':pid,'name':project['name'],'error':str(error)})
             return {'results':results}
         backup_match=re.fullmatch(r'/api/projects/([a-f0-9]{24})/backup',path)
         if backup_match and method=='POST':
-            with app.db() as db: user=self.user(db)
-            return app.backup(backup_match[1],user,data.get('token'))
+            with app.db() as db:
+                user=self.user(db);app.access(db,backup_match[1],user,owner=True)
+            return app.backup(backup_match[1],user,app.backup_token(user,data.get('token')))
         if method=='GET' and not path.startswith('/api/'):
             allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
             if path not in allowed: raise Problem('Not found.',404)
@@ -446,6 +515,8 @@ class Handler(BaseHTTPRequestHandler):
             if action=='folder' and method=='PUT':
                 if 'folder' not in data: raise Problem('Choose a destination folder.')
                 app.locate_project(db,user['id'],pid,data['folder']);return {'ok':True}
+            if action=='move-files' and method=='POST':
+                return app.move_files(db,p,data)
             if action=='backup-settings':
                 app.access(db,pid,user,owner=True)
                 if method=='PUT':
@@ -522,16 +593,12 @@ class Handler(BaseHTTPRequestHandler):
                 return {'versions':[dict(x) for x in db.execute('SELECT id,revision,author,created FROM history WHERE project_id=? AND path=? ORDER BY id DESC',(pid,name))]}
             if action=='source.zip' and method=='GET':
                 files={x['path']:x['content'] for x in db.execute('SELECT path,content FROM files WHERE project_id=?',(pid,))}
-                self.send(pack_zip(files),kind='application/zip',headers={'Content-Disposition':'attachment; filename="project-source.zip"'}); return
+                self.send(pack_zip(files),kind='application/zip',headers={'Content-Disposition':export_disposition(p['name'],'.zip')}); return
             if action in ('pdf','log') and method=='GET':
                 row=db.execute('SELECT * FROM builds WHERE project_id=?',(pid,)).fetchone()
                 if not row or (action=='pdf' and not row['pdf']): raise Problem('Compile successfully to generate a PDF.',404)
                 if action=='log': return {'log':row['log'],'success':bool(row['success']),'revision':row['revision']}
-                name=re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', '-', p['name']).strip(' .') or 'document'
-                filename=name if name.lower().endswith('.pdf') else name+'.pdf'
-                fallback=filename.encode('ascii','replace').decode().replace('?', '_')
-                disposition=('attachment' if 'download' in query else 'inline')+'; filename="'+fallback+'"; filename*=UTF-8\'\''+urllib.parse.quote(filename,safe='')
-                self.send(row['pdf'],kind='application/pdf',headers={'Content-Disposition':disposition}); return
+                self.send(row['pdf'],kind='application/pdf',headers={'Content-Disposition':export_disposition(p['name'],'.pdf','download' in query)}); return
             if action=='members':
                 if method=='GET': return {'members':[dict(x) for x in db.execute('SELECT u.id,u.email,u.name,m.role FROM members m JOIN users u ON u.id=m.user_id WHERE m.project_id=?',(pid,))]}
                 app.access(db,pid,user,owner=True)

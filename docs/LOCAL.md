@@ -52,6 +52,8 @@ Use **⋯ → Move to folder** on a project card or list row to choose its desti
 
 The root shows folders and projects that have not been filed. Search at the root finds projects in every folder; inside a folder it includes that folder's descendants. **My projects**, **Shared with me**, **Typst**, and **LaTeX** filters search across your whole collection.
 
+Use **Up one level** or **All projects** below the templates to leave a folder. Drag projects or folders onto another folder to move them; dragging onto **All projects** moves them to the root. Folder moves include their descendants and refuse cycles.
+
 Folders belong to your account. Moving a shared project changes only your own explorer; its source, sharing permissions, and other users' layouts stay the same. This organization is stored in SQLite with your projects, rather than as directories of `.typ` or `.tex` files on disk. A database backup preserves it. Source ZIP exports and GitHub backups contain document files, so restore your database to preserve the explorer layout as well.
 
 ## Starter templates
@@ -97,18 +99,23 @@ Visual mode edits simple top-level paragraphs, headings, bold/italic text, and T
 
 Typst projects may use local imports, figures, bibliography files, fonts available on your Mac, and packages from Typst Universe. Compilation starts a fresh CLI process per build; it does not yet use Typst's persistent incremental compiler or source-to-PDF position mapping.
 
+Drag files or directories onto a folder in the editor’s file tree, or onto **Project root**. Moves preserve bytes and revision history and update the main-document path. They refuse overwrites and folder merges. Update imports and image references to the old paths yourself. Source ZIP and PDF downloads use the project name.
+
+Typst auto-preview starts a build about 150 ms after you pause typing, saves first, and queues edits made during compilation. A temporary syntax error keeps the last rendered PDF visible; diagnostics remain available in the build log. LaTeX keeps its longer debounce. Each build invokes the native compiler, so large projects can take longer than Typst.app’s incremental preview. Turn off **Auto-compile** for manual builds.
+
 ## GitHub backups
 
 The **Backup** button is available to each project owner. Backup settings belong to the signed-in account.
 
-1. Create a GitHub repository (private for private documents). An empty repository or one initialized with a README works.
-2. Create a [fine-grained access token](https://github.com/settings/personal-access-tokens/new), select the backup repositories, and grant **Contents: Read and write**. Repositories are created on GitHub, not automatically by this app.
-3. Enter your shared repository as `owner/repository`, and optionally a branch. Blank uses the repository's default branch. For a nonempty repository, the selected branch must already exist.
-4. Keep **Use my shared repository** for your default layout. Each project gets a stable `projects/PROJECT_ID/` folder, containing its source, assets, and a small `labtex-project.json` manifest with its title and main file.
-5. For a separate document repository, select **Use a separate repository for this project** and enter that repository. Its source goes at the root. Other projects can continue using the shared repository.
-6. Choose **Back up this project** or **Back up all my projects**. The latter includes only projects you own, and reports each success or failure separately.
+1. Create a GitHub repository for your documents. Use a private repository for private work.
+2. Open the account menu in the project explorer → **GitHub backups**. Its **Create a GitHub access token** link opens GitHub’s token generator. Select your backup repositories and grant **Contents: Read and write**.
+3. Enter `owner/repository`, an optional branch, and your token. Leave **Remember token for future sessions** checked, then save settings or run a backup. Saved tokens are reused after reloads, sign-ins, and server restarts without displaying their value.
+4. Choose **Back up all to this repository**. Every project you own goes in `projects/PROJECT_ID/`, with its source, assets, and manifest. Shared projects owned by someone else are excluded. This action preserves each project’s separate-repository settings.
+5. In the editor’s account menu → **Back up this project** (or the **Backup** toolbar button), choose the shared layout or a separate repository for that document. The separate layout puts its source at the repository root.
 
-The access token is kept only in the current tab's memory and sent to this app when creating a backup; the server forwards it to GitHub over HTTPS. It is never saved in SQLite, logs, localStorage, or sessionStorage. Reloading the tab clears it. You can enable backup **30 seconds after saving while the tab is open**; enter a token again after a reload. Automatic backups pause on errors and show the reason. Closing the tab stops automatic backups. These are source snapshots, not a bidirectional Git sync.
+On macOS, remembered tokens live in **macOS Keychain**, scoped to this installation and account. If Keychain is locked, unlock it and retry. Linux stores them in private `data/.github-tokens/` files (0600, directory 0700); the server’s OS account can read them. Neither mode puts tokens in SQLite, logs, source ZIPs, GitHub snapshots, localStorage, or sessionStorage. The server sends the token to GitHub over HTTPS only when backing up. **Forget saved token** removes it from this installation without revoking it on GitHub. Uncheck Remember to use a new token only in the current tab’s memory.
+
+You can enable backups **30 seconds after saving while the tab is open**. Automatic backups pause on errors and stop when the tab closes; enable them again after a reload, reusing the saved token. These are source snapshots, not a bidirectional Git sync.
 
 Each snapshot uses the GitHub Git database API: unchanged blobs are reused, binary assets are preserved, deleted/renamed source files are reflected, unrelated repository files are retained, and branch updates never force-push. Concurrent changes or branch protection produce an error, retaining your local documents. A repeat backup with unchanged source produces no new commit. The GitHub commit link appears after a verified branch update. Never treat an error as a successful backup.
 

@@ -20,7 +20,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--screenshots',action='store_true',help='Capture documentation images using a fresh fictional demo account')
     args=parser.parse_args()
-    scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs', 'browser_tree.cjs', 'browser_project_folders.cjs', 'browser_templates_palettes.cjs', 'browser_project_actions.cjs', 'browser_library_layout.cjs', 'browser_file_actions.cjs')
+    scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs', 'browser_tree.cjs', 'browser_project_folders.cjs', 'browser_templates_palettes.cjs', 'browser_project_actions.cjs', 'browser_library_layout.cjs', 'browser_file_actions.cjs', 'browser_drag_live.cjs')
     with tempfile.TemporaryDirectory(prefix='labtex-browser-') as folder:
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
@@ -30,7 +30,7 @@ def main():
                    APP_ORIGIN=origin, TEST_ORIGIN=origin)
         log_path = Path(folder) / 'server.log'
         with log_path.open('w') as log:
-            server = subprocess.Popen([sys.executable, str(ROOT / 'server.py'), '--port', str(port)], cwd=ROOT, env=env, stdout=log, stderr=log)
+            server = subprocess.Popen([sys.executable, '-c', 'import server; from credential_store import FileTokenStore; server.token_store=lambda data: FileTokenStore(server.Path(data)/".github-tokens"); server.main()', '--port', str(port)], cwd=ROOT, env=env, stdout=log, stderr=log)
         try:
             for _ in range(100):
                 try:

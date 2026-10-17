@@ -70,3 +70,15 @@ dialog.template-library-dialog{width:900px;max-width:calc(100vw - 24px)}
 .file-context-menu button:hover,.file-context-menu button:focus-visible{background:var(--mint)}
 .file-context-menu hr{border:0;border-top:1px solid var(--line);margin:5px}
 #confirmDeleteFile{background:#a13535;color:#fff}
+
+.folder-location{margin:0 0 18px;flex-wrap:wrap;gap:14px}.folder-navigation{display:flex;align-items:center;gap:8px}.folder-navigation button{font-size:11px;white-space:nowrap}.folder-location nav{flex-basis:30%;min-width:120px}.folder-location .text-button{padding:7px;font-size:11px}
+.file-root-drop{flex:none;margin:0 10px 5px;padding:8px;text-align:left;border:1px dashed var(--line);border-radius:5px;font-size:10px;color:var(--muted)}.file-root-drop span{display:block;font-size:9px;margin-top:3px}
+@media(max-width:760px){.folder-location nav{order:3;flex-basis:100%}.folder-location .folder-navigation{flex:1}.folder-navigation button{font-size:10px}.folder-location .outline{font-size:10px}.folder-location{gap:10px}}
+
+.file-root-drop{display:flex;align-items:center;justify-content:space-between;gap:6px}.file-root-drop span{margin:0;font-size:8px}
+
+.home-main>.home-heading-actions{justify-content:flex-end;margin-bottom:18px}.home-main>.home-heading-actions button{font-size:12px;padding:10px 16px}
+@media(max-width:760px){.home-main>.home-heading-actions{width:100%}.home-main>.home-heading-actions button{font-size:11px;padding:10px 8px}}
+
+.home-action-row{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:18px}.home-action-row .home-heading-actions{width:auto}.home-action-row .home-view-tools{width:auto}.home-action-row .home-view-tools{margin-left:auto}.home-action-row .home-heading-actions button{padding:10px 14px}
+@media(max-width:760px){.home-action-row{gap:12px}.home-action-row .home-heading-actions{width:100%}.home-action-row .home-view-tools{width:100%}}

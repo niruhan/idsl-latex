@@ -2,6 +2,7 @@ import base64, http.client, io, json, os, sys, tempfile, threading, unittest, zi
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from server import App,Handler,BoundedHTTPServer
+from credential_store import FileTokenStore
 from core import SAMPLE,Problem,unpack_zip,safe_path,compile_project
 
 class Client:
@@ -19,7 +20,7 @@ class Client:
 class AppTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.server=BoundedHTTPServer(('127.0.0.1',0),Handler);self.port=self.server.server_address[1]
-        self.app=App(self.tmp.name,f'http://127.0.0.1:{self.port}');self.server.app=self.app
+        self.app=App(self.tmp.name,f'http://127.0.0.1:{self.port}');self.app.tokens=FileTokenStore(Path(self.tmp.name)/".github-tokens");self.server.app=self.app
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start();self.owner=Client(self.port)
         status,_=self.owner.call('/api/setup','POST',{'token':self.app.setup_token,'name':'Test Owner','email':'owner@example.test','password':'long-test-password'})
         self.assertEqual(status,200);self.pid=self.owner.call('/api/projects')[1]['projects'][0]['id'];self.base='/api/projects/'+self.pid
@@ -139,6 +140,17 @@ class AppTests(unittest.TestCase):
             self.assertEqual(urllib.parse.unquote(disposition.split("filename*=UTF-8''")[1]),expected)
             self.assertIsNone(response.getheader('X-Test'))
             conn.close()
+    def test_source_zip_download_uses_project_name(self):
+        import urllib.parse
+        name='Résumé / research: notes'
+        self.assertEqual(self.owner.call(self.base,'PUT',{'name':name})[0],200)
+        conn=http.client.HTTPConnection('127.0.0.1',self.port)
+        conn.request('GET',self.base+'/source.zip',headers={'Cookie':self.owner.cookie})
+        response=conn.getresponse();self.assertEqual(response.status,200)
+        disposition=response.getheader('Content-Disposition')
+        self.assertEqual(urllib.parse.unquote(disposition.split("filename*=UTF-8\'\'")[1]),'Résumé - research- notes.zip')
+        with zipfile.ZipFile(io.BytesIO(response.read())) as archive:self.assertIn('main.tex',archive.namelist())
+        conn.close()
     def test_zip_import_and_project_isolation(self):
         output=io.BytesIO()
         with zipfile.ZipFile(output,'w') as z:
