@@ -1,3 +1,4 @@
+const {editorOption}=require('./editor_ui.cjs');
 // Run against an empty disposable server; never against a user's workspace.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -29,20 +30,16 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.waitForFunction(() => document.querySelector('#code').value.includes('documentclass'));
     console.log('PASS account setup and project file tree');
 
-    // Edit an included section visually, then check the generated source and autosave.
+    // Source edits autosave and survive a reload without visual/formatting controls.
     await page.locator('button.tree-file[title="sections/introduction.tex"]').click();
     await page.waitForFunction(() => document.querySelector('#filePath').textContent === 'sections/introduction.tex');
-    await page.locator('#visualTab').click();
-    const paragraph = page.locator('[contenteditable=true][aria-label=Paragraph]').first();
-    await paragraph.fill('Browser-tested visual paragraph with 50% progress & reproducible results.');
+    assert.equal(await page.locator('#visualTab,.format-toolbar').count(),0);
+    await page.locator('#code').fill('Browser-tested source paragraph with 50\\% progress \\& reproducible results.');
     await page.waitForFunction(() => document.querySelector('#saveStatus').textContent === 'All changes saved');
-    await page.locator('#sourceTab').click();
-    assert.match(await page.locator('#code').inputValue(), /50\\% progress \\& reproducible/);
-    await page.reload();
-    await page.locator('button.tree-file[title="sections/introduction.tex"]').click();
+    await page.reload();await page.locator('button.tree-file[title="sections/introduction.tex"]').click();
     await page.waitForFunction(() => document.querySelector('#filePath').textContent === 'sections/introduction.tex');
-    assert.match(await page.locator('#code').inputValue(), /Browser-tested visual paragraph/);
-    console.log('PASS visual edit, TeX escaping, autosave, and reload persistence');
+    assert.match(await page.locator('#code').inputValue(), /Browser-tested source paragraph/);
+    console.log('PASS source-only editor, autosave and reload persistence');
 
     async function compile() {
       const response = page.waitForResponse(r => r.url().endsWith('/compile') && r.request().method() === 'POST', {timeout: 330000});
@@ -66,7 +63,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     console.log('PASS browser-triggered compilation, PDF pane, and PDF export');
 
     // Single-use viewer invite opens in a separate browser profile.
-    await page.locator('#shareButton').click();
+    await editorOption(page,'shareButton');
     await page.locator('#inviteRole').selectOption('viewer');
     await page.locator('#createInvite').click();
     await page.locator('#inviteUrl').waitFor();
@@ -143,7 +140,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     console.log('PASS approved-list UI, single-use account invitations, independent private projects and outsider rejection');
 
     const zipDownload = page.waitForEvent('download');
-    await page.locator('#exportSourceButton').click();
+    await editorOption(page,'exportSourceButton');
     const zipPath = path.join(output, 'roundtrip-source.zip');
     await (await zipDownload).saveAs(zipPath);
     await page.locator('#projectsButton').click();

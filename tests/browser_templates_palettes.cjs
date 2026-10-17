@@ -50,10 +50,10 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 
   await page.locator('#createProjectFolder').click();await page.locator('#projectFolderName').fill('Template examples');await page.locator('#projectFolderForm button.primary').click();await page.locator('#projectFolderForm').waitFor({state:'hidden'});
   const folder=new URLSearchParams(new URL(page.url()).hash.slice(1)).get('folder');assert.ok(folder);
-  await page.locator('[data-starter=western-presentation]').click();await page.locator('#workspace').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));
+  await page.locator('[data-starter=western-presentation]').click();await page.locator('#workspace').waitFor({state:'visible'});const westernBuild=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST');await page.locator('#compileButton').click();assert.equal((await(await westernBuild).json()).success,true);
   const western=new URLSearchParams(new URL(page.url()).hash.slice(1)).get('project');assert.equal((await get('/api/projects')).projects.find(p=>p.id===western).folder,folder);
   const source=await page.locator('#code').inputValue(),pdf=await page.locator('#pdfFrame').getAttribute('src');assert.match(source,/Your name/);assert.doesNotMatch(source,/Niruhan/);
-  await page.locator('#autoCompile').uncheck();await snapshot('western-presentation-starter');
+  assert.equal(await page.locator('#pdfFrame').isHidden(),true);await snapshot('western-presentation-starter');
   await page.locator('#accountButton').click();await page.locator('#accountAppearance').click();await page.locator('[data-palette-choice=nord]').click();await page.locator('#closeAppearance').click();await page.locator('#themeButton').click();
   assert.equal(await page.locator('#code').inputValue(),source);assert.equal(await page.locator('#pdfFrame').getAttribute('src'),pdf,'Palette changes must not reload or recolor document PDFs');
   await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'The mobile editor fits with both appearance controls');

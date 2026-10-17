@@ -1,6 +1,6 @@
 # IDSL Editor — LaTeX + Typst
 
-A local workspace for writing LaTeX and Typst, with a project explorer, visual/source editing, and a PDF preview. Run it on your Mac or host it for a small research group.
+A local workspace for writing LaTeX and Typst, with a project explorer, source editing, live Typst preview, and LaTeX PDF preview. Run it on your Mac or host it for a small research group.
 
 ## Screenshots
 
@@ -10,16 +10,17 @@ A local workspace for writing LaTeX and Typst, with a project explorer, visual/s
 | --- | --- |
 | [![Project explorer with LaTeX and Typst documents](docs/images/projects.png)](docs/images/projects.png) | [![Dark Typst editor](docs/images/dark-theme.png)](docs/images/dark-theme.png) |
 
-More views: [Live Typst + LSP](docs/images/typst-live.png) · [Typst](docs/images/typst-workspace.png) · [Template library](docs/images/template-library.png) · [Visual editor](docs/images/visual-editor.png) · [Image preview](docs/images/image-preview.png) · [File actions](docs/images/file-actions.png) · [Account menu](docs/images/account-menu.png) · [Themes](docs/images/themes.png) · [Western slides](docs/images/western-presentation.png) · [NeurIPS paper](docs/images/neurips-paper.png) · [Project actions](docs/images/project-actions.png) · [Project list](docs/images/projects-list.png) · [Mobile](docs/images/projects-mobile.png) · [Sharing](docs/images/sharing.png) · [GitHub backups](docs/images/github-backups.png).
+More views: [Source editing](docs/images/source-editor.png) · [Live Typst + LSP](docs/images/typst-live.png) · [Typst](docs/images/typst-workspace.png) · [Template library](docs/images/template-library.png) · [Image preview](docs/images/image-preview.png) · [File actions](docs/images/file-actions.png) · [Account menu](docs/images/account-menu.png) · [Themes](docs/images/themes.png) · [Western slides](docs/images/western-presentation.png) · [NeurIPS paper](docs/images/neurips-paper.png) · [Project actions](docs/images/project-actions.png) · [Project list](docs/images/projects-list.png) · [Mobile](docs/images/projects-mobile.png) · [Sharing](docs/images/sharing.png) · [GitHub backups](docs/images/github-backups.png).
 
 All screenshots use a temporary database, fictional demo accounts, and starter documents. They contain no real projects, credentials, or usable invitation links.
 
 ## Features
 
-- **Project explorer:** organize projects into nested folders; use **⋯** to rename, move, or delete a project, or drag it onto a folder. Cards/list, search, sorting, and format/ownership filters help you find documents. **My projects** saves and returns home.
-- **LaTeX + Typst:** source and basic visual editing, multi-file projects with collapsible folders, image previews (including SVG), right-click file actions, figures, and bibliographies.
+- **Project explorer:** organize projects into nested folders; use **⋯** to download a project's source ZIP, rename, move, or delete it, or drag it onto a folder. Cards/list, search, sorting, and format/ownership filters help you find documents. **My projects** saves and returns home.
+- **Focused workspace:** full-height source and preview, a collapsible file explorer (**Ctrl/Cmd+B**), and a compact **Project ⋯** menu for secondary controls.
+- **LaTeX + Typst:** source editing, multi-file projects with collapsible folders, image previews (including SVG), right-click file actions, figures, and bibliographies.
 - **Live Typst on Mac:** Tinymist keeps an incremental compiler running, streams preview updates while typing, and provides autocomplete, documentation, go-to-definition, formatting, diagnostics, and source/preview navigation.
-- **PDF preview + export:** manual or automatic PDF compilation, clickable errors, project-named PDF/ZIP downloads, and an independent **Dark PDF** preview toggle.
+- **PDF preview + export:** manual PDF compilation and automatic LaTeX builds, clickable errors, project-named PDF/ZIP downloads, and an independent **Dark PDF** preview toggle.
 - **Sharing:** invite coauthors to individual projects with editor or view-only access.
 - **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.
 - **GitHub backups:** keep all projects in named folders in one repository or use a separate repository per document; saved tokens, an all-project backup menu, and optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
@@ -27,7 +28,7 @@ All screenshots use a temporary database, fictional demo accounts, and starter d
 - **Themes:** choose IDSL Forest, Western Purple, Nord, GitHub, or Solarized under **Account → Themes & appearance**; switch light/dark with one click on the sun/moon button.
 - **Ready-to-use templates:** Western slides and NeurIPS are featured; **More templates** offers a Typst introduction, classic LaTeX article, Western thesis scaffold, coursework, Beamer slides, and academic CV.
 
-Visual mode supports basic headings, paragraphs, emphasis, and Typst lists. Advanced equations/templates remain editable in source cards. Templates create private, editable copies only when you choose one.
+Templates create private, editable copies only when you choose one.
 
 ## Quick start on macOS
 

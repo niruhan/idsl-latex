@@ -1,61 +1,54 @@
 // Tinymist language features and persistent preview, using authenticated app routes.
-export function createTypstLive({api,state,setText,navigate,compile,updateBuild,toast}){
+export function createTypstLive({api,state,setText,navigate,toast}){
  const $=id=>document.getElementById(id);
- let session=null,project=null,mainDocument=null,starting=false,generation=0,timer,pollTimer,completionTimer,flight=null,dirty=false,sequence=0,lastJump=0,view='live',lastState=null,capabilities=null,closing=Promise.resolve();
+ let session=null,project=null,mainDocument=null,starting=false,generation=0,timer,pollTimer,completionTimer,flight=null,dirty=false,sequence=0,lastJump=0,lastState=null,capabilities=null,closing=Promise.resolve(),lastError='',unavailable='';
  let choices=[],choice=0,completionSource=null;
- const tools=document.createElement('div');tools.id='typstTools';tools.className='typst-tools';tools.hidden=true;
- tools.innerHTML='<span id="typstLanguageStatus">Tinymist</span><button id="typstComplete" title="Autocomplete (Ctrl+Space)">Complete</button><button id="typstHover" title="Documentation at cursor">Docs</button><button id="typstDefinition" title="Go to definition (F12)">Definition</button><button id="typstFormat" title="Format source (Shift+Alt+F)">Format</button><button id="typstReveal" title="Find cursor in preview">Show in preview</button><button id="typstReconnect" hidden>Reconnect</button>';
- document.querySelector('.file-breadcrumb').after(tools);
- const problems=document.createElement('div');problems.id='typstProblems';problems.className='typst-problems';problems.hidden=true;tools.after(problems);
- const hover=document.createElement('div');hover.id='typstDocumentation';hover.className='typst-documentation';hover.hidden=true;tools.after(hover);
+ const problems=document.createElement('div');problems.id='typstProblems';problems.className='typst-problems';problems.hidden=true;document.querySelector('.editor-pane').prepend(problems);
+ const hover=document.createElement('div');hover.id='typstDocumentation';hover.className='typst-documentation';hover.hidden=true;problems.after(hover);
  const completions=document.createElement('div');completions.id='typstCompletions';completions.className='typst-completions';completions.setAttribute('role','listbox');completions.hidden=true;document.querySelector('.code-area').append(completions);
  const frame=document.createElement('iframe');frame.id='typstFrame';frame.title='Live Typst preview';frame.hidden=true;frame.setAttribute('sandbox','allow-scripts allow-same-origin');frame.referrerPolicy='no-referrer';$('pdfPreview').append(frame);
- const switches=document.createElement('div');switches.id='typstPreviewSwitch';switches.className='typst-preview-switch';switches.hidden=true;
- switches.innerHTML='<button id="showLivePreview" aria-pressed="true">Live</button><button id="showPdfPreview" aria-pressed="false">PDF</button>';
- $('buildStatus').before(switches);
+ const empty=document.createElement('div');empty.id='typstEmpty';empty.className='pdf-empty';empty.hidden=true;
+ const message=document.createElement('p');message.id='typstPreviewMessage';const reconnect=document.createElement('button');reconnect.id='typstReconnect';reconnect.className='outline';reconnect.textContent='Reconnect live preview';empty.append(message,reconnect);$('pdfPreview').append(empty);
  const active=()=>Boolean(session&&state().project?.id===project);
+ const isTypstProject=()=>Boolean(state().project?.main.endsWith('.typ'));
  const endpoint=()=>'/api/projects/'+project+'/typst/'+session;
  const position=()=>{const text=$('code').value.slice(0,$('code').selectionStart),lines=text.split('\n');return {line:lines.length-1,character:lines.at(-1).length};};
  const offset=(text,pos)=>{const lines=text.split('\n'),line=Math.min(Math.max(0,pos?.line||0),lines.length-1);return lines.slice(0,line).reduce((sum,value)=>sum+value.length+1,0)+Math.min(lines[line].length,Math.max(0,pos?.character||0));};
  function languageFile(){return active()&&state().file?.path.endsWith('.typ')&&state().mode==='source';}
  function controls(){
-  const live=active();tools.hidden=!live;switches.hidden=!live;
-  $('autoCompile').closest('label').hidden=live;
-  for(const id of ['typstComplete','typstHover','typstDefinition','typstFormat','typstReveal'])$(id).disabled=!languageFile();
-  document.querySelector('.preview-title').textContent=live?'Typst preview':'PDF preview';
+  const typst=isTypstProject();$('autoCompile').closest('label').hidden=typst;$('openPdfButton').hidden=typst;
+  document.querySelector('.preview-title').textContent=typst?'Live preview':'PDF preview';
  }
  function render(){
-  controls();if(!active())return false;
-  frame.hidden=view!=='live';$('pdfFrame').hidden=view==='live'||!state().project?.build?.success;
-  $('pdfEmpty').hidden=view==='live'||Boolean(state().project?.build?.success);
-  $('showLivePreview').setAttribute('aria-pressed',String(view==='live'));$('showPdfPreview').setAttribute('aria-pressed',String(view==='pdf'));
-  $('downloadButton').disabled=Boolean(state().building);
-  if(!state().building&&view==='live'){
-   const status=lastState?.status;
-   $('buildStatus').textContent=status==='CompileError'?'Live preview · source errors':status==='CompileSuccess'?'Live · '+lastState.pages+' '+(lastState.pages===1?'page':'pages'):'Updating live preview…';
-   $('buildStatus').className='build-status '+(status==='CompileError'?'failed':'');
-  }
+  controls();if(!isTypstProject()){empty.hidden=true;frame.hidden=true;return false;}
+  const running=active()&&!lastError;frame.hidden=!running;empty.hidden=running;$('pdfFrame').hidden=true;$('pdfEmpty').hidden=true;
+  // Typst PDF output is never loaded into the preview pane.
+  if($('pdfFrame').hasAttribute('src'))$('pdfFrame').removeAttribute('src');
+  message.textContent=lastError||unavailable||'Starting live preview…';reconnect.hidden=!lastError;
+  const status=lastState?.status;$('buildStatus').textContent=lastError?'Live preview disconnected':unavailable?'Live preview unavailable':status==='CompileError'?'Live preview · source errors':status==='CompileSuccess'?'Live · '+lastState.pages+' '+(lastState.pages===1?'page':'pages'):'Updating live preview…';
+  $('buildStatus').className='build-status '+(lastError||status==='CompileError'?'failed':'');
+  if(!active()&&state().project.build){const build=state().project.build;$('buildStatus').textContent=build.success?'Compiled in '+build.seconds+'s':'Build failed';$('buildStatus').className='build-status '+(build.success?'':'failed');}
   return true;
  }
  function closeCompletion(){completions.hidden=true;choices=[];$('code').removeAttribute('aria-activedescendant');$('code').setAttribute('aria-expanded','false');}
  function stop(){
   ++generation;clearTimeout(timer);clearTimeout(pollTimer);clearTimeout(completionTimer);const old=session,oldProject=project;
-  session=null;project=null;starting=false;flight=null;dirty=false;lastState=null;lastJump=0;view='live';sequence=0;
-  frame.src='about:blank';frame.hidden=true;hover.hidden=true;problems.hidden=true;closeCompletion();controls();
+  session=null;project=null;starting=false;flight=null;dirty=false;lastState=null;lastJump=0;lastError='';unavailable='';sequence=0;
+  frame.src='about:blank';frame.hidden=true;hover.hidden=true;problems.hidden=true;closeCompletion();render();
   if(old)closing=fetch('/api/projects/'+oldProject+'/typst/'+old,{method:'DELETE',headers:{'Content-Type':'application/json'},body:'{}',keepalive:true}).catch(()=>{});
   return closing;
  }
  async function open(){
-  const released=stop(),current=state();if(!current.project?.main.endsWith('.typ')||current.project.role==='viewer')return false;
-  const ticket=generation,pid=current.project.id;starting=true;
+  const released=stop(),current=state();if(!current.project?.main.endsWith('.typ'))return false;if(current.project.role==='viewer'){unavailable='Live preview requires editor access. You can export an existing PDF from this project.';render();return false;}
+  const ticket=generation,pid=current.project.id;starting=true;render();
   try{
    await released;if(ticket!==generation||state().project?.id!==pid)return false;
-   capabilities??=api('/api/typst-capabilities');if(!(await capabilities).available)return false;
+   capabilities??=api('/api/typst-capabilities');if(!(await capabilities).available){unavailable='Live preview is unavailable in this workspace. Use Export PDF to compile a copy.';render();return false;}
    const result=await api('/api/projects/'+pid+'/typst','POST',{});
    if(ticket!==generation||state().project?.id!==pid){api('/api/projects/'+pid+'/typst/'+result.id,'DELETE',{}).catch(()=>{});return false;}
-   project=pid;mainDocument=state().project.main;session=result.id;lastState=result;frame.src=result.preview;frame.hidden=false;starting=false;$('typstReconnect').hidden=true;$('typstLanguageStatus').textContent='Tinymist connected';
+   project=pid;mainDocument=state().project.main;session=result.id;lastState=result;frame.src=result.preview;frame.hidden=false;starting=false;lastError='';unavailable='';
    render();changed();pollTimer=setTimeout(poll,300);return true;
-  }catch(error){if(ticket===generation)toast('Live preview unavailable: '+error.message+' PDF compilation is available.');return false;}
+  }catch(error){if(ticket===generation){lastError=error.message;render();}return false;}
   finally{if(ticket===generation)starting=false;}
  }
  function accept(result){
@@ -63,14 +56,13 @@ export function createTypstLive({api,state,setText,navigate,compile,updateBuild,
   for(const [path,diagnostics] of Object.entries(result.diagnostics||{}))for(const diagnostic of diagnostics)items.push({path,...diagnostic});
   problems.replaceChildren();problems.hidden=!items.length;
   for(const item of items.slice(0,5)){const button=document.createElement('button');button.className='typst-diagnostic';button.textContent=item.path+':'+((item.range?.start?.line||0)+1)+' · '+item.message;button.addEventListener('click',()=>navigate(item.path,item.range).catch(error=>toast(error.message)));problems.append(button);}
-  $('typstLanguageStatus').textContent=items.length?items.length+' '+(items.length===1?'diagnostic':'diagnostics'):'Tinymist connected';
   if(result.jump&&result.jump.id>lastJump){lastJump=result.jump.id;navigate(result.jump.path,result.jump.range).catch(error=>toast(error.message));}
   if(current.project?.id===project)render();
  }
  async function poll(){
   if(!active())return;const ticket=generation;
   try{const result=await api(endpoint());if(ticket===generation)accept(result);}
-  catch(error){if(ticket===generation){$('typstLanguageStatus').textContent=error.message;$('typstReconnect').hidden=false;if([401,403,404,409,503].includes(error.status)){frame.src='about:blank';frame.hidden=true;return;}}}
+  catch(error){if(ticket===generation){if([401,403,404,409,503].includes(error.status)){lastError=error.message;frame.src='about:blank';render();return;}$('buildStatus').textContent=error.message;}}
   if(ticket===generation)pollTimer=setTimeout(poll,600);
  }
  function changed(){
@@ -79,7 +71,7 @@ export function createTypstLive({api,state,setText,navigate,compile,updateBuild,
   dirty=true;clearTimeout(timer);timer=setTimeout(()=>flush().catch(error=>report(error)),45);
   if(languageFile()&&/(?:#[\w]*|\.[\w]*|@[\w]*|<[\w-]*)$/.test($('code').value.slice(0,$('code').selectionStart)))completionTimer=setTimeout(()=>complete(false).catch(()=>{}),220);
  }
- function report(error){$('typstLanguageStatus').textContent=error.message;$('typstReconnect').hidden=false;}
+ function report(error){toast(error.message);}
  async function flush(){
   if(flight){await flight;if(dirty)return flush();return;}
   if(!active()||!dirty)return;
@@ -153,12 +145,12 @@ export function createTypstLive({api,state,setText,navigate,compile,updateBuild,
  }
  async function definition(){const result=await query('definition');if(result?.length)await navigate(result[0].path,result[0].range);else toast('No project definition found at this position.');}
  async function format(){const text=state().text,result=await query('formatting');if(state().text===text&&result?.length)setText(applyEdits(text,result));}
- async function reveal(){if(!languageFile())return;await flush();await api(endpoint(),'POST',{operation:'reveal',path:state().file.path,position:position()});view='live';render();}
- for(const [id,fn] of [['typstComplete',()=>complete()],['typstHover',documentation],['typstDefinition',definition],['typstFormat',format],['typstReveal',reveal],['typstReconnect',open]])$(id).addEventListener('click',()=>Promise.resolve(fn()).catch(report));
- $('showLivePreview').addEventListener('click',()=>{view='live';render();});
- $('showPdfPreview').addEventListener('click',async()=>{try{if(await compile()){view='pdf';updateBuild();render();}}catch(error){report(error);}});
+ async function reveal(){if(!languageFile())return;await flush();await api(endpoint(),'POST',{operation:'reveal',path:state().file.path,position:position()});render();}
+ reconnect.addEventListener('click',()=>open().catch(report));
  $('code').addEventListener('keydown',event=>{
   if(!languageFile())return;
+  if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.code==='Space'){event.preventDefault();event.stopImmediatePropagation();documentation().catch(report);return;}
+  if(event.altKey&&event.key==='Enter'){event.preventDefault();reveal().catch(report);return;}
   if((event.ctrlKey||event.metaKey)&&event.code==='Space'){event.preventDefault();event.stopImmediatePropagation();complete().catch(report);return;}
   if(event.key==='F12'){event.preventDefault();definition().catch(report);return;}
   if(event.shiftKey&&event.altKey&&event.key.toLowerCase()==='f'){event.preventDefault();format().catch(report);return;}
@@ -167,7 +159,7 @@ export function createTypstLive({api,state,setText,navigate,compile,updateBuild,
    if(event.key==='Escape')closeCompletion();else if(['Enter','Tab'].includes(event.key))applyCompletion();else{choice=(choice+(event.key==='ArrowDown'?1:-1)+choices.length)%choices.length;selectedChoice();}
   }
  },true);
- $('code').addEventListener('click',()=>{closeCompletion();if(languageFile())documentation().catch(()=>{});});
+ $('code').addEventListener('click',()=>{closeCompletion();});
  document.addEventListener('pointerdown',event=>{if(!event.target.closest('#typstCompletions,#typstComplete'))closeCompletion();});
  // Downloads and cancelled navigation can fire beforeunload while this editor
  // stays open. Release the worker only once the page actually leaves.

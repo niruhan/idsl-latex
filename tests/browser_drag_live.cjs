@@ -1,3 +1,4 @@
+const {editorOption}=require('./editor_ui.cjs');
 /* Isolated browser fixture; never run against a personal installation. */
 const assert=require('node:assert/strict');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
@@ -36,24 +37,12 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='images/notes/main.typ');assert.equal((await api(base)).main,'images/notes/main.typ');
   await page.locator('.tree-folder[data-folder="images/notes"]').dragTo(page.locator('#fileRootDrop'));
   await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='notes/main.typ');
-  const download=page.waitForEvent('download');await page.locator('#exportSourceButton').click();assert.equal((await download).suggestedFilename(),'Live drag document.zip');
+  const download=page.waitForEvent('download');await editorOption(page,'exportSourceButton');assert.equal((await download).suggestedFilename(),'Live drag document.zip');
   console.log('PASS editor file/folder/root drag, main-document tracking and project-named source ZIP');
 
-  const content='= Live preview\n\nA small valid Typst document.\n';await page.locator('#code').fill(content);
-  let response=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST');await page.locator('#compileButton').click();assert.equal((await(await response).json()).success,true);await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));
-  const enabling=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST');await page.locator('#autoCompile').check();await enabling;await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));let release,started;const held=new Promise(resolve=>release=resolve),began=new Promise(resolve=>started=resolve);let calls=0,elapsed;const start=Date.now();
-  await page.route('**/api/projects/'+pid+'/compile',async route=>{calls++;if(calls===1){elapsed=Date.now()-start;const result=await route.fetch();started();await held;await route.fulfill({response:result});}else await route.continue();});
-  await page.locator('#code').fill(content+'\nFirst edit.');await Promise.race([began,new Promise((_,reject)=>setTimeout(()=>reject(Error('Typing did not start a build')),10000))]);assert.ok(elapsed<750,'Typing should start a build promptly, observed '+elapsed+'ms');
-  const queued=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST'&&calls>=2);await page.locator('#code').fill(content+'\nLatest queued edit.');release();
-  await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));
-  await page.waitForFunction(()=>document.querySelector('#saveStatus').textContent==='All changes saved');
-  assert.equal((await(await queued).json()).success,true);
-  await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));
-  assert.ok(calls>=2);assert.match((await api(base+'/file?path=notes/main.typ')).content,/Latest queued edit/);await page.unroute('**/api/projects/'+pid+'/compile');
-  response=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST');await page.locator('#code').fill('#unknown-function(');assert.equal((await(await response).json()).success,false);await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent==='Build failed');
-  assert.equal(await page.locator('#pdfFrame').isVisible(),true);assert.equal(await page.locator('#logPanel').isHidden(),true);
-  response=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST');await page.locator('#code').fill(content);assert.equal((await(await response).json()).success,true);await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));await page.locator('#autoCompile').uncheck();
-  console.log('PASS Typst typing debounce ('+elapsed+'ms), queued edits, retained PDF during syntax errors and recovery');
+  await page.locator('#code').fill('= Export document\n\nA valid Typst document.\n');
+  const pdfDownload=page.waitForEvent('download');await page.locator('#downloadButton').click();const pdf=await pdfDownload;assert.equal(pdf.suggestedFilename(),'Live drag document.pdf');assert.equal(await page.locator('#pdfFrame').isHidden(),true);assert.equal(await page.locator('#openPdfButton').isHidden(),true);assert.equal(await page.locator('#autoCompile').isHidden(),true);
+  console.log('PASS Typst PDF export without an embedded PDF view or background PDF compilation');
 
   await api('/api/backup-settings','PUT',{repository:'example/research-documents'});await page.locator('#accountButton').click();assert.equal(await page.locator('#accountBackups').count(),0,'All-project backups belong only in the explorer');await page.locator('#accountProjectBackup').click();assert.equal(await page.locator('#backupAll').count(),0,'Editor backup dialog must only back up its current project');assert.match(await page.locator('#backupPath').textContent(),/project name/);assert.equal((await page.locator('#backupPath').textContent()).includes(pid),false);assert.equal(await page.locator('#backupSharedRepo').count(),0);assert.match(await page.locator('#projectGlobalBackup').textContent(),/example\/research-documents/);if(process.env.CAPTURE_BACKUP_DOC==='1'){await page.screenshot({path:'docs/images/github-backups.png',fullPage:true});}await page.locator('#backupMode').selectOption('separate');await page.locator('#backupProjectRepo').fill('example/separate-document');await page.locator('#backupForm button[type=submit]').click();await page.locator('#backupResult').getByText('Backup settings saved.',{exact:false}).waitFor();await page.locator('#closeModal').click();
   await page.locator('#projectsNavButton').click();await page.locator('#homeAccountButton').click();await page.locator('#accountBackups').click();
@@ -70,7 +59,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const countBulk=request=>{if(request.method()==='POST'&&request.url().endsWith('/api/backups'))allUpdates++;};page.on('request',countBulk);
   await page.route('**'+base+'/backup-settings',async route=>{assert.equal(route.request().method(),'GET','Updating the global snapshot must not rewrite separate-project settings');const response=await route.fetch();const value=await response.json();await route.fulfill({response,json:{...value,global_backup:sharedStatus}});});
   await page.route('**'+base+'/backup',async route=>{assert.deepEqual(route.request().postDataJSON(),{token:'',sharedOnly:true});projectUpdates++;if(failShared){await route.fulfill({status:502,json:{error:'Test shared backup failed'}});return;}sharedStatus={...sharedStatus,stale:false,snapshot:{...sharedStatus.snapshot,last_commit:'a'.repeat(40),last_url:'https://github.com/example/all-documents/commit/'+'a'.repeat(40),last_revision:projectRevision,updated:2}};await route.fulfill({json:{name:'Live drag document',changed:true,repository:'example/all-documents',folder:'projects/Live drag document',commit:'a'.repeat(40),url:sharedStatus.snapshot.last_url}});});
-  await page.goto(origin+'/#project='+pid);await page.locator('#workspace').waitFor({state:'visible'});await page.locator('#backupButton').click();
+  await page.goto(origin+'/#project='+pid);await page.locator('#workspace').waitFor({state:'visible'});await editorOption(page,'backupButton');
   assert.equal(await page.getByRole('button',{name:/Back up all/i}).count(),0);assert.equal(await page.locator('#backupSharedRepo').count(),0);assert.equal(await page.locator('#backupMode').inputValue(),'separate');
   assert.match(await page.locator('#globalBackupRepository').textContent(),/example\/all-documents/);assert.match(await page.locator('#globalBackupStatus').textContent(),/Changes since/);await page.locator('#updateGlobalBackup').click();
   await page.locator('#globalBackupStatus').getByText(/saved changes are backed up/).waitFor();assert.equal(projectUpdates,1);assert.equal(allUpdates,0);assert.equal((await api(base+'/backup-settings')).repository,'example/separate-document');assert.equal(await page.locator('#backupMode').inputValue(),'separate');

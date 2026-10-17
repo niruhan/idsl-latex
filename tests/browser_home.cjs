@@ -44,8 +44,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 
   await page.locator('.project-entry[data-project="'+sample.id+'"]').click();await page.locator('#workspace').waitFor({state:'visible'});
   assert.equal(await page.locator('#projectHome').isHidden(),true);assert.equal(await page.locator('#filePath').textContent(),'main.typ');
-  await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));
-  await page.locator('#autoCompile').uncheck();
+  const compiled=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST');await page.locator('#compileButton').click();assert.equal((await(await compiled).json()).success,true);assert.equal(await page.locator('#pdfFrame').isHidden(),true);
   const source=await page.locator('#code').inputValue();
   await page.locator('#code').fill(source+'\n// Save before returning to the project explorer.\n');
   await page.locator('#projectsNavButton').click();await page.locator('#projectHome').waitFor({state:'visible'});

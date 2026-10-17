@@ -14,6 +14,17 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
  const menu=(target,id)=>target.locator('[data-project-actions="'+id+'"]');
  async function choose(target,id,action){await menu(target,id).locator('summary').click();await target.locator('[data-'+action+'-project="'+id+'"]').click();}
  async function rename(target,id,name){await choose(target,id,'rename');await target.locator('#renameProjectName').fill(name);await target.locator('#saveProjectName').click();await target.locator('#renameProjectForm').waitFor({state:'hidden'});}
+ async function exportSource(target,context,id,name,files){
+  const location=target.url(),before=await api(context,'/api/projects/'+id),pending=target.waitForEvent('download');
+  await choose(target,id,'download');const download=await pending;assert.equal(download.url(),origin+'/api/projects/'+id+'/source.zip');assert.equal(download.suggestedFilename(),name+'.zip');
+  const filename=path.join(output,'explorer-'+id+'.zip');await download.saveAs(filename);const zip=fs.readFileSync(filename);assert.equal(zip.subarray(0,4).toString('hex'),'504b0304');
+  const copy=(await api(context,'/api/projects','POST',{name:'Downloaded source check',zip:zip.toString('base64')})).id;
+  try{
+   const imported=await api(context,'/api/projects/'+copy);assert.deepEqual(imported.files.map(file=>file.path).sort(),Object.keys(files).sort());
+   for(const [file,content] of Object.entries(files))assert.equal((await api(context,'/api/projects/'+copy+'/file?path='+encodeURIComponent(file))).content,content);
+  }finally{await api(context,'/api/projects/'+copy,'DELETE',{});}
+  assert.equal((await api(context,'/api/projects/'+id)).revision,before.revision);assert.equal(target.url(),location);assert.equal(await target.locator('#projectHome').isVisible(),true);assert.equal(await target.locator('#workspace').isHidden(),true);assert.equal(await menu(target,id).getAttribute('open'),null);
+ }
  async function member(role){
   const email='explorer-'+role+'@example.test';const invitation=await api(owner,'/api/lab-invite','POST',{count:1});
   const context=await browser.newContext({viewport:{width:1440,height:960}});
@@ -26,7 +37,10 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await page.goto(origin);await page.locator('input[name=email]').fill('browser-owner@example.test');await page.locator('input[name=password]').fill('browser-test-password-only');await page.locator('#authSubmit').click();await page.locator('.project-entry').first().waitFor();
   id=(await api(owner,'/api/projects','POST',{name:'Explorer draft',format:'typst',template:false})).id;base='/api/projects/'+id;
   const keep=(await api(owner,'/api/projects','POST',{name:'Keep this paper',format:'latex',template:false})).id;
-  const before=await api(owner,base+'/file?path=main.typ');await page.locator('#refreshProjects').click();await item(page,id).waitFor();
+  const before=await api(owner,base+'/file?path=main.typ'),sourceFiles={'main.typ':before.content,'notes/summary.typ':'= Included notes\n','images/diagram.svg':'<svg xmlns="http://www.w3.org/2000/svg"><circle r="5"/></svg>'};
+  for(const file of ['notes/summary.typ','images/diagram.svg'])await api(owner,base+'/file','PUT',{path:file,content:sourceFiles[file],revision:0});
+  await page.locator('#refreshProjects').click();await item(page,id).waitFor();
+  await exportSource(page,owner,id,'Explorer draft',sourceFiles);await exportSource(page,owner,keep,'Keep this paper',{'main.tex':(await api(owner,'/api/projects/'+keep+'/file?path=main.tex')).content});
   await menu(page,id).locator('summary').focus();await page.keyboard.press('Enter');assert.equal(await menu(page,id).getAttribute('open'),'');await page.keyboard.press('Escape');assert.equal(await menu(page,id).getAttribute('open'),null);
   await menu(page,id).locator('summary').click();await menu(page,keep).locator('summary').click();assert.equal(await page.locator('.project-actions[open]').count(),1);await page.locator('#projectSearch').click();assert.equal(await page.locator('.project-actions[open]').count(),0);
   await choose(page,id,'rename');assert.equal(await page.locator('#renameProjectName').inputValue(),'Explorer draft');await page.locator('#renameProjectName').fill('   ');assert.equal(await page.locator('#saveProjectName').isDisabled(),true);await page.locator('#cancelRenameProject').click();assert.equal((await api(owner,base)).name,'Explorer draft');
@@ -35,12 +49,15 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const folder=(await api(owner,'/api/project-folders','POST',{name:'Action examples'})).id;await page.locator('#refreshProjects').click();await page.locator('.home-folder-link[data-folder="'+folder+'"]').waitFor();await choose(page,id,'move');await page.locator('#projectFolderTarget').selectOption(folder);await page.locator('#moveProjectForm button').click();await page.locator('#moveProjectForm').waitFor({state:'hidden'});
   await page.locator('.home-folder-link[data-folder="'+folder+'"]').click();await item(page,id).waitFor();await page.locator('#projectListView').click();await rename(page,id,'Shared explorer notes');
   assert.equal((await api(owner,'/api/projects')).projects.find(p=>p.id===id).folder,folder);
+  await exportSource(page,owner,id,'Shared explorer notes',sourceFiles);
   console.log('PASS accessible menus, outside/Escape dismissal, cancel/empty-name handling, escaped names, grid/list rename persistence and unchanged source/folder placement');
 
   const approved=await api(owner,'/api/approved-emails');await api(owner,'/api/approved-emails','PUT',{emails:[...approved.emails,'explorer-editor@example.test','explorer-viewer@example.test']});
   const editor=await member('editor'),viewer=await member('viewer');
   await menu(editor.page,id).locator('summary').click();assert.equal(await editor.page.locator('[data-rename-project="'+id+'"]').isVisible(),true);assert.equal(await editor.page.locator('[data-delete-project="'+id+'"]').count(),0);await editor.page.keyboard.press('Escape');
   await menu(viewer.page,id).locator('summary').click();assert.equal(await viewer.page.locator('[data-rename-project="'+id+'"]').count(),0);assert.equal(await viewer.page.locator('[data-delete-project="'+id+'"]').count(),0);assert.equal(await viewer.page.locator('[data-move-project="'+id+'"]').isVisible(),true);
+  await viewer.page.keyboard.press('Escape');await exportSource(viewer.page,viewer.context,id,'Shared explorer notes',sourceFiles);
+  console.log('PASS explorer source ZIP downloads for LaTeX/Typst, nested assets, project filenames, grid/list/folders and viewers without opening the editor');
   assert.equal((await viewer.context.request.put(origin+base,{headers:{Origin:origin},data:{name:'Forbidden rename'}})).status(),403);
   for(const context of [editor.context,viewer.context])assert.equal((await context.request.delete(origin+base,{headers:{Origin:origin},data:{}})).status(),403);
   await rename(editor.page,id,'Reviewed explorer notes');await page.locator('#refreshProjects').click();await item(page,id).locator('h2').filter({hasText:'Reviewed explorer notes'}).waitFor();
@@ -50,7 +67,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await page.unroute(origin+base);await page.locator('#saveProjectName').click();await page.locator('#renameProjectForm').waitFor({state:'hidden'});assert.deepEqual(await api(owner,base+'/file?path=main.typ'),before);
   console.log('PASS owner/editor/viewer permissions, shared rename visibility and failed-request recovery');
 
-  await page.evaluate(()=>{window.labtexTheme.setPalette('western');window.labtexTheme.set('dark');});await page.setViewportSize({width:390,height:844});await page.locator('#projectGridView').click();await menu(page,id).locator('summary').click();
+  await page.evaluate(()=>{window.labtexTheme.setPalette('western');window.labtexTheme.set('dark');});await page.setViewportSize({width:390,height:844});await page.locator('#projectGridView').click();await exportSource(page,owner,id,'Ready to archive',sourceFiles);await menu(page,id).locator('summary').click();
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile action menu must fit the viewport');await page.screenshot({path:path.join(output,'project-actions-mobile.png'),fullPage:true,animations:'disabled'});
   await page.locator('[data-delete-project="'+id+'"]').click();assert.equal(await page.locator('#confirmDeleteProject').isDisabled(),true);await page.locator('#deleteProjectName').fill('Wrong name');assert.equal(await page.locator('#confirmDeleteProject').isDisabled(),true);await page.locator('#cancelDeleteProject').click();assert.equal((await api(owner,base)).name,'Ready to archive');
   await choose(page,id,'delete');await page.locator('#deleteProjectName').fill('Ready to archive');assert.equal(await page.locator('#confirmDeleteProject').isDisabled(),false);await page.screenshot({path:path.join(output,'delete-project-confirmation.png'),fullPage:true,animations:'disabled'});await page.locator('#confirmDeleteProject').click();await page.locator('#deleteExplorerProjectForm').waitFor({state:'hidden'});

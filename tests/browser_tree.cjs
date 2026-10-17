@@ -1,3 +1,4 @@
+const {editorOption}=require('./editor_ui.cjs');
 /* File-tree checks; run only against run_browser.py's disposable database. */
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -32,12 +33,12 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   assert.equal(await page.locator('#fileTree > button.tree-file').first().getAttribute('title'),'main.typ');
   const svgBefore=await api('/api/projects/'+first+'/file?path=images/safe-image.svg'),external=[];page.on('request',request=>{if(request.url().includes('example.test/preview-probe'))external.push(request.url());});
   await file('images/safe-image.svg').click();await page.locator('#binaryPreview img').waitFor();await page.waitForFunction(()=>{const image=document.querySelector('#binaryPreview img');return image.complete&&image.naturalWidth===160;});
-  assert.equal(await page.locator('#sourceEditor').isHidden(),true);assert.equal(await page.locator('#visualTab').textContent(),'Preview');assert.equal(await page.evaluate(()=>Boolean(window.svgPreviewExecuted)),false);assert.equal(await page.locator('#binaryPreview svg,#binaryPreview script,#binaryPreview iframe').count(),0);assert.deepEqual(external,[]);
+  assert.equal(await page.locator('#sourceEditor').isHidden(),true);assert.equal(await page.locator('#assetPreviewTab').textContent(),'Preview');assert.equal(await page.evaluate(()=>Boolean(window.svgPreviewExecuted)),false);assert.equal(await page.locator('#binaryPreview svg,#binaryPreview script,#binaryPreview iframe').count(),0);assert.deepEqual(external,[]);
   const imageOutput=process.env.TEST_OUTPUT||path.join(process.cwd(),'artifacts');fs.mkdirSync(imageOutput,{recursive:true});await page.screenshot({path:path.join(imageOutput,'svg-image-preview.png'),animations:'disabled'});
-  await page.locator('#sourceTab').click();assert.equal(await page.locator('#code').inputValue(),svgBefore.content);assert.equal(await page.locator('#binaryPreview').isHidden(),true);
-  await page.locator('#visualTab').click();await page.locator('#binaryPreview img').waitFor();
+  await editorOption(page,'sourceTab');assert.equal(await page.locator('#code').inputValue(),svgBefore.content);assert.equal(await page.locator('#binaryPreview').isHidden(),true);
+  await editorOption(page,'assetPreviewTab');await page.locator('#binaryPreview img').waitFor();
   await file('images/pixel.png').click();await page.waitForFunction(()=>{const image=document.querySelector('#binaryPreview img');return image?.complete&&image.naturalWidth===1;});assert.equal(await page.locator('#sourceTab').isDisabled(),true);
-  await file('main.typ').click();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='main.typ');assert.equal(await page.locator('#sourceTab').getAttribute('aria-selected'),'true');await page.locator('#visualTab').click();await file('images/safe-image.svg').click();await page.locator('#binaryPreview img').waitFor();await file('main.typ').click();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='main.typ');assert.equal(await page.locator('#visualEditor').isVisible(),true);await page.locator('#sourceTab').click();
+  await file('main.typ').click();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='main.typ');assert.equal(await page.locator('#sourceTab').getAttribute('aria-pressed'),'true');await file('images/safe-image.svg').click();await page.locator('#binaryPreview img').waitFor();await file('main.typ').click();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='main.typ');assert.equal(await page.locator('#sourceEditor').isVisible(),true);assert.equal(await page.locator('#assetPreviewTab').isHidden(),true);
   assert.deepEqual(await api('/api/projects/'+first+'/file?path=images/safe-image.svg'),svgBefore);
   console.log('PASS SVG/raster image previews, optional SVG source, inert SVG scripts/external resources, restored document mode and unchanged asset bytes');
   await folder('images').click();assert.equal(await folder('images').getAttribute('aria-expanded'),'false');assert.equal(await file('images/figure-0.svg').isVisible(),false);

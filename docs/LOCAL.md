@@ -40,7 +40,7 @@ After signing in, you land on the project explorer. Browse cards or switch to a 
 
 Click a project to enter its editor. **My projects** returns to the explorer after saving your edits. Browser Back/Forward and direct project links also work; reloading an editor keeps that project open.
 
-Open **⋯** on a project card or list row to **Rename**, **Move to folder**, or **Delete** it. Owners and editors can rename; only owners can delete. Deletion requires typing the project name and removes the project and its history for all collaborators. Existing GitHub backups are retained. Viewers can move projects within their own explorer.
+Open **⋯** on a project card or list row to **Download source ZIP**, **Rename**, **Move to folder**, or **Delete** it. Source downloads include all files and assets in the selected LaTeX or Typst project, use the project name as the ZIP filename, and keep you in the explorer. Everyone with project access can download its source, including viewers. Owners and editors can rename; only owners can delete. Deletion requires typing the project name and removes the project and its history for all collaborators. Existing GitHub backups are retained. Viewers can move projects within their own explorer.
 
 The **Getting started with Typst** sample is a regular choice under **More templates**. It contains an included section, an equation, and bibliography. Home visits never add projects automatically; existing sample projects and their edits are preserved.
 
@@ -83,23 +83,23 @@ The sun/moon button still switches light/dark with one click. In **Account → T
 
 ## Write in either format
 
-Open **My projects → New project** and choose **Typst** or **LaTeX**, then a research starter or a blank document. Imported ZIPs detect `main.typ` or `main.tex`; choose a different entry point under **Main document** when necessary. A project can contain both formats, and changing the main document selects its compiler.
+Open **My projects → New project** and choose **Typst** or **LaTeX**, then a research starter or a blank document. Imported ZIPs detect `main.typ` or `main.tex`; choose a different entry point under **Project ⋯ → Main document** when necessary. A project can contain both formats, and changing the main document selects its compiler.
 
-Click **Dark PDF** in the preview pane to display the rendered document in dark colors. This choice is remembered separately from the interface theme and works with any palette in light or dark mode. It changes the on-screen preview only; exported PDFs and document source keep their original colors.
+Choose **Dark preview** in the top bar, beside the theme toggle, to display the rendered document in dark colors. This choice is remembered separately from the interface theme and works with any palette in light or dark mode. It changes the on-screen preview only; exported PDFs and document source keep their original colors.
 
-Both formats use the same file tree, autosave, history, source ZIP export, and project-named PDF download. On Mac, editable Typst projects open the Tinymist live preview automatically. LaTeX and the Typst PDF fallback retain manual/automatic PDF builds and clickable `file:line:column` errors in the build log.
+Both formats use the same file tree, autosave, history, source ZIP export, and project-named PDF download. On Mac, editable Typst projects open the Tinymist live preview automatically. LaTeX retains manual/automatic PDF builds and clickable `file:line:column` errors in the build log. Typst PDF generation is available through **Export PDF**; it does not replace the live view.
 
-Source and Visual edits save automatically after a half-second pause, or every five seconds while you keep typing. Leaving a project or switching files waits for the latest save, including browser Back/Forward and **Account → My projects**. Switching tabs or leaving the browser window also triggers a save. A failed save or coauthor conflict keeps the editor open with your draft; temporary connection/server errors retry automatically. Check **All changes saved** before closing the tab. Unsaved drafts remain recoverable in the same browser tab, and the browser warns before leaving with pending changes.
+Source edits save automatically after a half-second pause, or every five seconds while you keep typing. Leaving a project or switching files waits for the latest save, including browser Back/Forward and **Account → My projects**. Switching tabs or leaving the browser window also triggers a save. A failed save or coauthor conflict keeps the editor open with your draft; temporary connection/server errors retry automatically. Check **All changes saved** before closing the tab. Unsaved drafts remain recoverable in the same browser tab, and the browser warns before leaving with pending changes.
 
-Use **Ctrl+Z** or **Cmd+Z** to undo, and **Ctrl/Cmd+Shift+Z** or **Ctrl+Y** to redo. This works in Source and Visual, including toolbar formatting, Tab indentation, and Typst completions/formatting. Autosave keeps your undo history; each file has its own. Refreshing the page clears this in-memory history. **File history** still provides earlier saved revisions.
+Use **Ctrl+Z** or **Cmd+Z** to undo, and **Ctrl/Cmd+Shift+Z** or **Ctrl+Y** to redo. This works in source editing, including Tab indentation and Typst completions/formatting. Autosave keeps your undo history; each file has its own. Refreshing the page clears this in-memory history. **File history** in a file’s right-click menu provides earlier saved revisions without switching the open editor.
 
-Right-click a file in **Project files** for **Download**, **Rename**, **Replace**, or **Delete**. The **•••** file-actions button and **Shift+F10** offer the same menu. Replacement keeps its project path and saves the old version in history; renaming does not update document references. Viewers can only download. Choose another main document before deleting the current one.
+Right-click a file in **Project files** for **Download**, **File history**, **Rename**, **Replace**, or **Delete**. Focus a file and press **Shift+F10** for the same menu. Opening this menu keeps your current file, selection, and edits in the editor; its actions apply to the file you right-clicked. Replacement keeps its project path and saves the old version in history; renaming does not update document references. Viewers can download and inspect history, but cannot restore or change files. Choose another main document before deleting the current one.
 
 Click a folder name or its arrow under **Project files** to collapse or expand it, including nested folders. Your choices are remembered per project in this browser. Root files such as `main.typ` stay at the top. File search reveals matches inside collapsed folders; clearing the search restores your folder layout. Opening a file from search or a compiler diagnostic reveals its parent folders.
 
-Click an image in **Project files** to preview it in the left pane. SVGs and common raster images open in **Preview**; SVGs also offer **Source** for editing. Selecting a document returns to your previous Source/Visual mode.
+Click an image in **Project files** to preview it in the left pane. SVGs and common raster images open in **Preview**; SVGs also offer **Project ⋯ → Source** for editing and **Preview** to return to the image. Selecting a document returns to its source.
 
-Visual mode edits simple top-level paragraphs, headings, bold/italic text, and Typst lists. Equations, citations, imports, functions, templates, and advanced formatting remain in source cards. Switching modes preserves untouched source. The formatting toolbar inserts the right syntax for the current language; bold and italic also work on selected visual text. Use Source mode for full control. This is structured block editing with a compiled PDF, not arbitrary PDF editing or complete WYSIWYG layout editing.
+The editor uses one compact top bar with no pane headers or footers. Click the panel icon at the top-right of the file explorer, or press **Ctrl/Cmd+B** to hide or show Project files; the choice is remembered in this browser, and a slim rail keeps the reopen button accessible. On phones, files open in a dismissible drawer. **Project ⋯** keeps sharing, source ZIP download, main-document selection, build logs, auto-compile, help, and document details together. **GitHub backup** and the independent **Dark preview** button sit beside the theme toggle. Source stays in the left pane. LaTeX uses the PDF preview on the right; Typst uses live preview. Save with **Ctrl/Cmd+S**, or rely on autosave.
 
 Typst projects may use local imports, figures, bibliography files, fonts available on your Mac, and packages from Typst Universe.
 
@@ -109,23 +109,23 @@ Drag files or directories onto a folder in the editor’s file tree, or onto **P
 
 A persistent [Tinymist](https://github.com/Myriad-Dreamin/tinymist) process keeps Typst's incremental compiler and file watcher alive for the open project. Edits reach its in-memory source buffer after a short typing debounce, independently of autosave. Its bundled renderer streams incremental updates over an authenticated WebSocket without rebuilding a PDF or reloading the preview iframe on each edit. Imported files and assets saved in the project are synchronized into its private watched directory. Temporary syntax errors retain the previous good render and show clickable diagnostics above the source.
 
-In **Source** mode, use the Tinymist toolbar:
+Language features work directly in the source editor without a toolbar:
 
 | Control | Action |
 | --- | --- |
-| **Complete** / `Ctrl+Space` | Autocomplete at the cursor; arrows select, Enter/Tab accepts, Escape closes |
-| **Docs** or click a source symbol | Show documentation and inferred values/types at the cursor |
-| **Definition** / `F12` | Open the definition in a project source file |
-| **Format** / `Shift+Option+F` | Apply Tinymist's document formatter; autosave/history still apply |
-| **Show in preview** | Scroll the live preview to the current source position |
+| `Ctrl+Space` (or `Cmd+Space`) | Autocomplete at the cursor; arrows select, Enter/Tab accepts, Escape closes |
+| `Ctrl/Cmd+Shift+Space` | Show documentation and inferred values/types at the cursor |
+| `F12` | Open the definition in a project source file |
+| `Shift+Alt/Option+F` | Apply Tinymist's document formatter; autosave/history still apply |
+| `Alt/Option+Enter` | Scroll the live preview to the current source position |
 | Click source content in the live preview | Jump back to its source location when Tinymist provides a mapping |
-| **Reconnect** | Restart a failed or expired live session |
+| **Reconnect live preview** (shown only after a connection error) | Restart a failed or expired live session |
 
-**Live / PDF** switches between the incremental renderer and a freshly compiled PDF. **Compile** still creates a PDF; **Export PDF** saves and compiles the current source before downloading `PROJECT NAME.pdf`. **Dark PDF** also applies to the live view, independently of the app theme. Exported bytes retain document colors.
+Typst always keeps the live view on the right, with no Live/PDF switch. **Export PDF** saves and compiles the current source before downloading `PROJECT NAME.pdf`, without interrupting live editing. **Dark preview** changes the live view independently of the app theme. Exported bytes retain document colors.
 
 The live service uses temporary mirrors; your authoritative source and history remain in `data/labtex.sqlite3`. Leaving the editor or signing out releases its worker. Up to two live tabs per account and three per installation may run; unused sessions expire after three minutes. Close another live tab if the limit is reached.
 
-Tinymist live editing is currently enabled by the **local Mac runner**. Linux shared hosting keeps its existing isolated PDF compiler; view-only projects also use the PDF pane. If Tinymist cannot start, the editor retains PDF compilation. Set `LABTEX_TYPST_LIVE=0 ./labtex start` after stopping the app to deliberately use the PDF fallback. Its Typst auto-compile starts about 150 ms after typing pauses and saves first; LaTeX uses a longer debounce. The fallback's **Auto-compile** checkbox controls those PDF builds.
+Tinymist live editing is enabled by the **local Mac runner** for editable projects. If it is unavailable, the right pane explains why rather than loading a PDF. Linux shared hosting retains its isolated compiler for **Export PDF**; viewers may download an existing compiled PDF. Typst does not run background PDF builds while typing. LaTeX keeps its **Auto-compile** option.
 
 ![Tinymist live preview and language controls with fictional source](images/typst-live.png)
 
@@ -165,4 +165,4 @@ python3 tests/run_browser.py
 
 Set `CHROME_BIN` to an installed Chromium-based browser if Playwright's Chromium is unavailable. Screenshots/PDFs go into ignored `artifacts/`.
 
-Add `--live-typst` to run the native Tinymist browser checks, including incremental rendering, language features, and PDF export. The default suite explicitly exercises the PDF fallback.
+Add `--live-typst` to run the native Tinymist browser checks, including incremental rendering, language features, and PDF export. The default suite checks Typst PDF export when live preview is unavailable.

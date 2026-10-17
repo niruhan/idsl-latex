@@ -6,7 +6,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
  const context=await browser.newContext(),page=await context.newPage(),errors=[],ids=[],names=new Map();page.setDefaultTimeout(15000);page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
  async function api(url,method='GET',data){const response=await context.request.fetch(origin+url,{method,headers:{Origin:origin},data});assert.equal(response.ok(),true,await response.text());return response.json();}
  const projectUrl=id=>origin+'/#project='+id;
- async function open(id){await page.goto(projectUrl(id));await page.waitForFunction(name=>document.querySelector('#projectTitle').textContent===name&&!document.querySelector('#workspace').hidden&&!document.querySelector('#workspace').inert,names.get(id));await page.locator('#sourceTab').click();}
+ async function open(id){await page.goto(projectUrl(id));await page.waitForFunction(name=>document.querySelector('#projectTitle').textContent===name&&!document.querySelector('#workspace').hidden&&!document.querySelector('#workspace').inert,names.get(id));}
  async function content(id,path){return (await api('/api/projects/'+id+'/file?path='+encodeURIComponent(path))).content;}
  async function saved(){await page.waitForFunction(()=>document.querySelector('#saveStatus').textContent==='All changes saved');}
  async function eventually(fn){for(let i=0;i<100;i++){if(await fn())return;await new Promise(resolve=>setTimeout(resolve,50));}assert.fail('Expected saved content was not persisted');}
@@ -16,9 +16,9 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const typst=await fixture('typst'),latex=await fixture('latex'),code=page.locator('#code');
   for(const [id,path] of [[typst,'main.typ'],[latex,'main.tex']]){
    await open(id);const text='Saved before leaving '+path;await code.fill(text);await page.locator('#projectsNavButton').click();await page.locator('#projectHome').waitFor({state:'visible'});assert.equal(await content(id,path),text);
-   await open(id);await page.locator('#visualTab').click();await page.locator('#visualEditor [contenteditable=true]').first().fill('Visual autosave');await page.locator('#accountButton').click();await page.locator('#accountProjects').click();await page.locator('#projectHome').waitFor({state:'visible'});assert.equal(await content(id,path),'Visual autosave');
+   await open(id);await code.fill('Account autosave');await page.locator('#accountButton').click();await page.locator('#accountProjects').click();await page.locator('#projectHome').waitFor({state:'visible'});assert.equal(await content(id,path),'Account autosave');
   }
-  console.log('PASS immediate project exit saves LaTeX/Typst source and visual edits through navigation and account menu');
+  console.log('PASS immediate project exit saves LaTeX/Typst source edits through navigation and account menu');
 
   await open(typst);const large='Large source '.repeat(6000);await code.fill(large);await page.locator('#projectsNavButton').click();await page.locator('#projectHome').waitFor({state:'visible'});assert.equal(await content(typst,'main.typ'),large);
   await open(typst);let temporaryFailure=true;const savePattern='**/api/projects/'+typst+'/file';await page.route(savePattern,async route=>{if(route.request().method()==='PUT'&&temporaryFailure){temporaryFailure=false;await route.fulfill({status:503,json:{error:'Temporary autosave outage'}});}else await route.continue();});await code.fill('Automatic retry draft');await page.locator('#saveStatus.error').waitFor();await saved();assert.equal(await content(typst,'main.typ'),'Automatic retry draft');await page.unroute(savePattern);
