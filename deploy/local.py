@@ -32,10 +32,10 @@ def environment():
     env = dict(os.environ)
     for key in ('COMPILER_URL', 'SETUP_TOKEN', 'TRUST_CLOUDFLARE', 'LATEX_ENGINE', 'HOST', 'PORT',
                 'APP_ORIGIN', 'DATA_DIR', 'TECTONIC_BIN', 'TYPST_BIN', 'LABTEX_TMPDIR',
-                'TYPST_PACKAGE_PATH', 'TYPST_PACKAGE_CACHE_PATH'):
+                'TYPST_PACKAGE_PATH', 'TYPST_PACKAGE_CACHE_PATH', 'TINYMIST_BIN'):
         env.pop(key, None)
     env.update(LATEX_ENGINE='tectonic', TECTONIC_BIN=str(STATE / 'bin/tectonic'),
-               TYPST_BIN=str(STATE / 'bin/typst'), LABTEX_COMPILER_HOME=str(STATE / 'compiler-home'),
+               TYPST_BIN=str(STATE / 'bin/typst'), TINYMIST_BIN=str(STATE / 'bin/tinymist'), LABTEX_COMPILER_HOME=str(STATE / 'compiler-home'),
                LABTEX_TMPDIR=str(STATE / 'builds'), COMPILE_TIMEOUT='300',
                PYTHONDONTWRITEBYTECODE='1', PYTHONUNBUFFERED='1')
     return env
@@ -48,7 +48,7 @@ def setup():
     machine = {'arm64': 'aarch64', 'x86_64': 'x86_64'}.get(platform.machine())
     if not machine:
         raise RuntimeError('Unsupported Mac architecture: ' + platform.machine())
-    for name in ('typst', 'tectonic'):
+    for name in ('typst', 'tectonic', 'tinymist'):
         pin = PINS[machine][name]
         archive = STATE / 'downloads' / pin['url'].rsplit('/', 1)[-1]
         download(pin, archive)
@@ -70,17 +70,36 @@ def setup():
 
 def doctor():
     env = environment()
-    for name in ('typst', 'tectonic'):
+    for name in ('typst', 'tectonic', 'tinymist'):
         path = STATE / 'bin' / name
         if not path.is_file():
             raise RuntimeError('Missing ' + name + '. Run ./labtex setup.')
         subprocess.run([str(path), '--version'], check=True)
     subprocess.run([sys.executable, '-c', '''
+import os, tempfile, time
+from pathlib import Path
+from types import SimpleNamespace
 from core import SAMPLE, TYPST_SAMPLE, compile_project
+from typst_service import TypstSession
 for files, main in ((TYPST_SAMPLE, 'main.typ'), (SAMPLE, 'main.tex')):
     result = compile_project(files, main)
     assert result['success'], result['log']
     print(main + ': real PDF compilation passed (' + str(result['seconds']) + 's)')
+with tempfile.TemporaryDirectory(prefix='labtex-doctor-') as folder:
+    manager = SimpleNamespace(binary=os.environ['TINYMIST_BIN'], app=SimpleNamespace(data=Path(folder), origin='http://127.0.0.1:8765'))
+    session = TypstSession(manager, 'doctor', {'id': 'doctor', 'main': 'main.typ', 'revision': 1}, {'main.typ': b'#let answer = 42\\n#answer'})
+    try:
+        end = time.monotonic()+30
+        while time.monotonic() < end and session.state()['status'] == 'Compiling':
+            time.sleep(.1)
+        assert session.state()['status'] == 'CompileSuccess', 'Tinymist initial compile failed'
+        session.change('main.typ', '#let answer = 84\\n#answer', 1)
+        hover = session.query('hover', 'main.typ', {'line': 1, 'character': 3})
+        assert '84' in str(hover), 'Tinymist did not read the unsaved editor buffer'
+        session.preview_html('/preview/')
+        print('Tinymist: persistent compiler, LSP and preview startup passed')
+    finally:
+        session.close()
 '''], cwd=ROOT, env=env, check=True)
 
 
@@ -139,7 +158,7 @@ def start(port=None):
     if running():
         print(f"Already running: http://127.0.0.1:{settings()['port']}")
         return
-    for name in ('typst', 'tectonic'):
+    for name in ('typst', 'tectonic', 'tinymist'):
         if not (STATE / 'bin' / name).is_file():
             raise RuntimeError('Run ./labtex setup first.')
     port = port or settings()['port']

@@ -89,6 +89,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await viewer.waitForFunction(()=>document.querySelector('#roleLabel').textContent==='owner');
     await viewer.goto(invite);
     await viewer.waitForFunction(() => document.querySelector('#roleLabel').textContent === 'viewer');
+    await viewer.locator('#code[readonly]').waitFor({state:'attached'});
     assert.equal(await viewer.locator('#compileButton').isDisabled(), true);
     assert.equal(await viewer.locator('#code').getAttribute('readonly'), '');
     await viewerContext.close();
@@ -154,7 +155,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
     // A failed build must remove the PDF from the preview and export controls.
     await page.locator('button.tree-file[title="main.tex"]').click();
-    await page.waitForFunction(() => document.querySelector('#filePath').textContent === 'main.tex');
+    await page.waitForFunction(() => document.querySelector('#filePath').textContent === 'main.tex' && !document.querySelector('#workspace').inert);
     const oldSource = await page.locator('#code').inputValue();
     await page.locator('#code').fill('\\documentclass{article}\\begin{document}\\invalidcommand\\end{document}');
     const failure = page.waitForResponse(r => r.url().endsWith('/compile') && r.request().method() === 'POST');

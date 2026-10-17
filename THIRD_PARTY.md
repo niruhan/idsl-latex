@@ -15,6 +15,7 @@ Exact download URLs and SHA-256 digests are in [deploy/dependencies.json](deploy
 ## macOS local compiler downloads
 
 - [Typst](https://github.com/typst/typst), Apache-2.0. Official binaries include their font/license notices in the release archive, retained under `.local/downloads`.
+- [Tinymist 0.15.10](https://github.com/Myriad-Dreamin/tinymist), Apache-2.0. Provides the persistent Typst compiler, language server, and bundled preview frontend. Its executable and third-party renderer dependencies are downloaded as part of the pinned upstream release, outside the source tree.
 - [Tectonic](https://github.com/tectonic-typesetting/tectonic), MIT. Its downloaded TeX packages/fonts retain their respective licenses.
 
 macOS archive versions, URLs, and SHA-256 digests are pinned for Apple Silicon and Intel in `deploy/local-dependencies.json`.

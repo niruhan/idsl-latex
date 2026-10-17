@@ -1,20 +1,29 @@
 import {escapeHTML as esc,renderVisual,renderTypstVisual} from './visual.js';
+import {createTypstLive} from './typst-live.js';
+import {createEditHistory} from './edit-history.js';
 const $=id=>document.getElementById(id);
 const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',documentMode:'source',assetUrl:null,dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,keepPreview:false,githubToken:'',githubSaved:false,backupAuto:false};
 const Home={visible:false,projects:[],folders:[],templates:[],folder:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
 const FileTree={projects:new Map(),searchKey:null,searchCollapsed:new Set()};
-let movingFiles=false,saveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false,startingBuild=false,navigationId=0;const backupTimers=new Map();
+const EditHistory=createEditHistory();let pendingEdit=null;
+let movingFiles=false,saveTimer,maxSaveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false,startingBuild=false,navigationId=0;
+let navigationQueue=Promise.resolve(),pendingNavigations=0;const backupTimers=new Map();
+const Live=createTypstLive({api,state:()=>S,setText,navigate:navigateTypst,compile,updateBuild,toast});
 const isTypst=()=>S.file?.path.endsWith('.typ');
 const isDocument=()=>/\.(tex|typ)$/.test(S.file?.path||'');
 const typstProject=()=>Boolean(S.project?.main.endsWith('.typ'));
 function scheduleCompile(){
- clearTimeout(autoTimer);if(!$('autoCompile').checked||!editable())return;
+ clearTimeout(autoTimer);if(typstProject()&&(Live.active||Live.starting)){if(Live.active)Live.changed();return;}if(!$('autoCompile').checked||!editable())return;
  if(S.building||startingBuild){if(S.dirty)compileAgain=true;return;}
  autoTimer=setTimeout(()=>compile({automatic:true}).catch(fail),typstProject()?150:900);
 }
 const apiPath=(action='')=>'/api/projects/'+S.project.id+(action?'/'+action:'');
 async function api(path,method='GET',body){
- const response=await fetch(path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
+ const payload=body?JSON.stringify(body):undefined;
+ // Small document saves can finish even if the tab is being unloaded. Larger
+ // documents use normal fetch and retain the unsaved-changes leave warning.
+ const keepalive=method==='PUT'&&/\/file$/.test(path)&&new Blob([payload]).size<60000;
+ const response=await fetch(path,{method,headers:body?{'Content-Type':'application/json'}:{},body:payload,keepalive});
  const value=await response.json();if(!response.ok){const e=new Error(value.error||'Request failed');e.status=response.status;throw e;}return value;
 }
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,5000);}
@@ -25,7 +34,65 @@ function closeModal(){$('modal').close();}
 function draftKey(){return `labtex-draft:${S.user?.id}:${S.project?.id}:${S.file?.path}`;}
 function keepDraft(){if(S.file&&S.dirty){try{sessionStorage.setItem(draftKey(),JSON.stringify({content:S.text,revision:S.file.revision}));}catch{toast('Browser draft storage is full. Save or download your draft.');}}}
 function markSaved(label,kind=''){$('saveStatus').textContent=label;$('saveStatus').className='save-status '+kind;}
-function setText(text,fromVisual=false){S.text=text;S.dirty=S.text!==S.saved;markSaved(S.dirty?'Unsaved changes':'All changes saved',S.dirty?'dirty':'');if(!fromVisual){$('code').value=text;highlight();}keepDraft();clearTimeout(saveTimer);if(S.dirty&&!S.conflict)saveTimer=setTimeout(()=>save().catch(fail),800);updateStats();updateBuild();if(typstProject())scheduleCompile();}
+function cancelAutosave(){clearTimeout(saveTimer);clearTimeout(maxSaveTimer);saveTimer=maxSaveTimer=null;}
+function scheduleAutosave(delay=500){
+ clearTimeout(saveTimer);if(!S.dirty||S.conflict||!editable()){cancelAutosave();return;}
+ const flush=()=>save().catch(()=>{}); // save() reports errors and schedules retries.
+ saveTimer=setTimeout(flush,delay);if(!maxSaveTimer)maxSaveTimer=setTimeout(flush,5000);
+}
+function flushAutosave(){if(S.dirty||S.saving){keepDraft();save().catch(()=>{});}}
+function restoreCurrentRoute(){setProjectRoute(S.project?'#project='+S.project.id:projectFolderRoute(Home.folder),'replace');}
+function savedNavigation(task,{saveFirst=true}={}){
+ // Serialize transitions and freeze the old editor until its final save and the
+ // next file/project load finish. Typing into a departing document cannot race.
+ pendingNavigations++;$('workspace').inert=true;
+ const job=navigationQueue.then(async()=>{
+  if(saveFirst&&S.project&&!await save()){restoreCurrentRoute();return false;}
+  return task();
+ }).catch(error=>{restoreCurrentRoute();throw error;}).finally(()=>{
+  pendingNavigations--;if(!pendingNavigations)$('workspace').inert=movingFiles;
+ });
+ navigationQueue=job.catch(()=>{});return job;
+}
+function editKey(){return `${S.user?.id}:${S.project?.id}:${S.file?.path}`;}
+function visualFields(){return [...$('visualEditor').querySelectorAll('[contenteditable=true],textarea')];}
+function editSelection(){
+ const area=$('code');
+ if(S.mode!=='visual')return {mode:'source',start:area.selectionStart,end:area.selectionEnd,direction:area.selectionDirection};
+ const fields=visualFields(),field=fields.find(el=>el===document.activeElement)||fields.find(el=>el.contains(getSelection()?.anchorNode));
+ if(!field)return {mode:'visual',index:0,start:0,end:0};
+ if(field.tagName==='TEXTAREA')return {mode:'visual',index:fields.indexOf(field),start:field.selectionStart,end:field.selectionEnd,direction:field.selectionDirection};
+ const selection=getSelection();
+ // Range endpoints preserve backwards selections as well as the caret.
+ const range=selection.rangeCount?selection.getRangeAt(0):null;
+ if(!range||!field.contains(range.startContainer)||!field.contains(range.endContainer))return {mode:'visual',index:fields.indexOf(field),start:0,end:0};
+ const startRange=document.createRange(),endRange=document.createRange();startRange.selectNodeContents(field);startRange.setEnd(range.startContainer,range.startOffset);endRange.selectNodeContents(field);endRange.setEnd(range.endContainer,range.endOffset);
+ return {mode:'visual',index:fields.indexOf(field),start:startRange.toString().length,end:endRange.toString().length,direction:selection.anchorNode===range.startContainer&&selection.anchorOffset===range.startOffset?'forward':'backward'};
+}
+function restoreEditSelection(selection,fallback=0,focus=true){
+ if(S.mode==='source'){
+  const area=$('code'),saved=selection?.mode==='source'?selection:{start:fallback,end:fallback};
+  if(focus)area.focus();area.setSelectionRange(saved.start,saved.end,saved.direction||'none');return;
+ }
+ const fields=visualFields(),saved=selection?.mode==='visual'?selection:{index:0,start:0,end:0},field=fields[Math.min(saved.index,fields.length-1)];if(!field)return;
+ if(focus)field.focus();
+ if(field.tagName==='TEXTAREA'){field.setSelectionRange(saved.start,saved.end,saved.direction||'none');return;}
+ const point=offset=>{const walker=document.createTreeWalker(field,NodeFilter.SHOW_TEXT);let node,last;while(node=walker.nextNode()){last=node;if(offset<=node.length)return [node,offset];offset-=node.length;}return last?[last,last.length]:[field,0];};
+ const start=point(saved.start),end=point(saved.end),selectionRange=getSelection();selectionRange.setBaseAndExtent(...(saved.direction==='backward'?[...end,...start]:[...start,...end]));
+}
+function captureEdit(kind=''){pendingEdit={key:editKey(),text:S.text,before:editSelection(),kind};}
+function setText(text,fromVisual=false,options={}){
+ const pending=pendingEdit?.key===editKey()&&pendingEdit.text===S.text?pendingEdit:null;pendingEdit=null;
+ const before=options.before||pending?.before||editSelection();
+ if(!fromVisual&&$('code').value!==text){$('code').value=text;if(S.mode==='source')restoreEditSelection(options.after||before,0,false);}
+ if(options.history!==false)EditHistory.record(S.text,text,before,options.after||editSelection(),options.kind??pending?.kind??'');
+ S.text=text;S.dirty=S.text!==S.saved;markSaved(S.dirty?'Unsaved changes':'All changes saved',S.dirty?'dirty':'');if(!fromVisual)highlight();keepDraft();scheduleAutosave();updateStats();updateBuild();if(typstProject())scheduleCompile();
+}
+function undoEdit(redo=false){
+ if(!editable()||!S.file||S.file.content===null)return;
+ const result=EditHistory.step(redo,S.text);pendingEdit=null;if(!result)return;
+ setText(result.text,false,{history:false});if(S.mode==='visual')editorMode('visual');restoreEditSelection(result.selection,result.start);updateStats();
+}
 function highlight(){
  const value=$('code').value;
  $('lineNumbers').textContent=Array.from({length:value.split('\n').length},(_,i)=>i+1).join('\n');
@@ -54,20 +121,23 @@ function editorMode(mode){
  const asset=Boolean(imageType())||S.file?.content===null,preview=asset&&mode==='visual';
  $('sourceTab').classList.toggle('active',mode==='source');$('visualTab').classList.toggle('active',mode==='visual');$('sourceTab').setAttribute('aria-selected',String(mode==='source'));$('visualTab').setAttribute('aria-selected',String(mode==='visual'));
  $('sourceEditor').hidden=mode!=='source'||S.file?.content===null;$('visualEditor').hidden=mode!=='visual'||asset;$('binaryPreview').hidden=!preview;
- $('code').value=S.text;
+ EditHistory.breakGroup();pendingEdit=null;if($('code').value!==S.text)$('code').value=S.text;
  if(preview)renderAssetPreview();
  else if(mode==='visual'&&S.file?.content!==null)(isTypst()?renderTypstVisual:renderVisual)($('visualEditor'),S.text,editable(),text=>setText(text,true));
  else highlight();
+ Live.render();
 }
 async function save(){
- clearTimeout(saveTimer);
+ cancelAutosave();
  if(S.saving){await S.saving;if(S.dirty&&!S.conflict)return save();return !S.conflict;}
  if(!S.dirty)return true;if(S.conflict||!editable())return false;
- const content=S.text,path=S.file.path,pid=S.project.id,key=draftKey(),revision=S.file.revision;markSaved('Saving…');
- S.saving=(async()=>{try{const r=await api(`/api/projects/${pid}/file`,'PUT',{path,content,revision});S.file.revision=r.revision;S.saved=content;S.dirty=S.text!==content;if(!S.dirty){sessionStorage.removeItem(key);markSaved('All changes saved');}else{keepDraft();markSaved('Unsaved changes','dirty');}
+ const file=S.file,content=S.text,path=file.path,pid=S.project.id,key=draftKey(),revision=file.revision;markSaved('Saving…');
+ S.saving=(async()=>{try{const r=await api(`/api/projects/${pid}/file`,'PUT',{path,content,revision});
+ if(S.project?.id!==pid||S.file!==file)return true;
+ file.revision=r.revision;S.saved=content;S.dirty=S.text!==content;if(!S.dirty){sessionStorage.removeItem(key);markSaved('All changes saved');}else{keepDraft();markSaved('Unsaved changes','dirty');}
  const meta=S.project.files.find(f=>f.path===path);if(meta)meta.revision=r.revision;
  scheduleCompile();scheduleBackup(pid);return true;
- }catch(e){markSaved(e.status===409?'Save conflict':'Could not save','error');keepDraft();if(e.status===409){S.conflict=true;await showConflict();return false;}throw e;}finally{S.saving=null;}})();
+ }catch(e){markSaved(e.status===409?'Save conflict':'Could not save','error');keepDraft();if(e.status===409){S.conflict=true;cancelAutosave();await showConflict();return false;}if(!e.status||e.status>=500||e.status===429)scheduleAutosave(3000);throw e;}finally{S.saving=null;}})();
  const ok=await S.saving;if(S.dirty&&ok&&!S.conflict)return save();return ok;
 }
 async function showConflict(){const latest=await api(apiPath('file')+'?path='+encodeURIComponent(S.file.path));modal('Two versions, both safe',`<p>A coauthor changed this file. Your draft has not overwritten their work. Download your draft, then load the latest version and merge your changes.</p><div class="conflict-grid"><label>Your draft<textarea id="localConflict" readonly></textarea></label><label>Server version<textarea id="serverConflict" readonly></textarea></label></div><div class="actions"><button id="downloadDraft" class="outline">Download my draft</button><button id="useServer" class="primary">Load server version</button></div>`);$('localConflict').value=S.text;$('serverConflict').value=latest.content??'[Binary file]';action('downloadDraft',()=>download(S.text,'my-draft.'+(isTypst()?'typ':'tex'),'text/plain'));action('useServer',()=>{download(S.text,'my-draft.'+(isTypst()?'typ':'tex'),'text/plain');sessionStorage.removeItem(draftKey());S.conflict=false;S.dirty=false;closeModal();loadFile(S.file.path,true);});}
@@ -107,7 +177,7 @@ async function moveProjectFiles(dragged,folder){
   const result=await api('/api/projects/'+pid+'/move-files','POST',{path:dragged.path,directory:dragged.directory,folder,revision:project.revision});
   if(S.project?.id!==pid)return;
   await refreshAfterFileChange(pid,result.moves[selected]||selected);toast(result.changed?'Moved. Update references to the old paths.':'Already in this folder.');
- }finally{movingFiles=false;$('workspace').inert=false;}
+ }finally{movingFiles=false;$('workspace').inert=Boolean(pendingNavigations);}
 }
 function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toLowerCase();const tree=$('fileTree'),state=folderState();const root={folders:new Map(),files:[]};
  const searchKey=state.key+':'+term;if(FileTree.searchKey!==searchKey){FileTree.searchKey=searchKey;FileTree.searchCollapsed.clear();}
@@ -138,14 +208,21 @@ function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toL
  tree.replaceChildren();renderNode(root,tree);
  $('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';$('mainFile').innerHTML=S.project.files.filter(f=>/\.(tex|typ)$/.test(f.path)).map(f=>`<option value="${esc(f.path)}">${esc(f.path)}</option>`).join('');$('mainFile').value=S.project.main;
 }
-async function loadFile(path,force=false){if(!force&&(!await save()))return;const pid=S.project.id;const f=await api(apiPath('file')+'?path='+encodeURIComponent(path));if(S.project?.id!==pid)return;S.file=f;S.text=f.content??'';S.saved=S.text;S.dirty=false;S.conflict=false;$('filePath').textContent=path;$('fileType').textContent=path.endsWith('.typ')?'Typst':path.endsWith('.tex')?'LaTeX':path.split('.').pop().toUpperCase();$('code').setAttribute('aria-label',isTypst()?'Typst source':isDocument()?'LaTeX source':'File source');
+function loadFile(path,force=false){return savedNavigation(()=>readFile(path),{saveFirst:!force});}
+async function readFile(path){const pid=S.project.id;const f=await api(apiPath('file')+'?path='+encodeURIComponent(path));if(S.project?.id!==pid)return;S.file=f;S.text=f.content??'';S.saved=S.text;S.dirty=false;S.conflict=false;$('filePath').textContent=path;$('fileType').textContent=path.endsWith('.typ')?'Typst':path.endsWith('.tex')?'LaTeX':path.split('.').pop().toUpperCase();$('code').setAttribute('aria-label',isTypst()?'Typst source':isDocument()?'LaTeX source':'File source');
  const asset=Boolean(imageType())||f.content===null;S.mode=isDocument()?S.documentMode:asset?'visual':'source';
  $('sourceTab').disabled=f.content===null;$('visualTab').disabled=!isDocument()&&!asset;$('visualTab').textContent=asset?'Preview':'Visual';$('saveButton').disabled=!editable()||f.content===null;
  document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable()||!isDocument());$('code').readOnly=!editable();markSaved('All changes saved');clearAssetPreview();
- if(f.content!==null){let draft;try{draft=JSON.parse(sessionStorage.getItem(draftKey()));}catch{}if(draft&&draft.content!==f.content){S.text=draft.content;S.dirty=true;markSaved('Recovered browser draft','dirty');if(draft.revision!==f.revision){S.conflict=true;await showConflict();}else{toast('Recovered your unsaved draft.');saveTimer=setTimeout(()=>save().catch(fail),1000);}}}
- revealFile(path);editorMode(S.mode);renderFiles();updateStats();
+ if(f.content!==null){let draft;try{draft=JSON.parse(sessionStorage.getItem(draftKey()));}catch{}if(draft&&draft.content!==f.content){S.text=draft.content;S.dirty=true;markSaved('Recovered browser draft','dirty');if(draft.revision!==f.revision){S.conflict=true;await showConflict();}else{toast('Recovered your unsaved draft.');scheduleAutosave();}}}
+ EditHistory.select(editKey(),S.text);pendingEdit=null;revealFile(path);editorMode(S.mode);renderFiles();updateStats();Live.changed();
 }
-async function openProject(pid,{historyMode='push'}={}){if(S.project&&!await save())return;const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile','saveButton'])$(id).disabled=!editable();document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable());$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await loadFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path,true);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||(localStorage.getItem('labtex-auto:'+pid)===null&&S.project.main.endsWith('.typ'));$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();if($('autoCompile').checked&&!S.project.build)scheduleCompile();if(!S.invite)setProjectRoute('#project='+pid,historyMode);}
+async function navigateTypst(path,range){
+ if(!S.project?.files.some(file=>file.path===path))return;
+ if(S.file?.path!==path)await loadFile(path);if(S.file?.path!==path)return;editorMode('source');const lines=S.text.split('\n');
+ const index=position=>lines.slice(0,position?.line||0).reduce((sum,line)=>sum+line.length+1,0)+(position?.character||0);
+ $('code').focus();$('code').setSelectionRange(index(range?.start),index(range?.end||range?.start));$('code').scrollTop=Math.max(0,((range?.start?.line||0)-3)*23);updateStats();
+}
+function openProject(pid,{historyMode='push'}={}){return savedNavigation(async()=>{Live.stop();const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile','saveButton'])$(id).disabled=!editable();document.querySelectorAll('[data-insert]').forEach(b=>b.disabled=!editable());$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await readFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||(localStorage.getItem('labtex-auto:'+pid)===null&&S.project.main.endsWith('.typ'));$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();Live.open().then(enabled=>{if(S.project?.id===pid&&!enabled&&$('autoCompile').checked&&!S.project.build)scheduleCompile();});if(!S.invite)setProjectRoute('#project='+pid,historyMode);});}
 // A fresh browsing context keeps PDF loads out of page Back/Forward history.
 // Unloading it on the home page also releases the native PDF viewer.
 function replacePdfFrame(src=null){
@@ -158,12 +235,13 @@ function replacePdfFrame(src=null){
 function updateBuild(force=false){if(!S.project)return;const b=S.project.build;const stale=S.dirty||b&&b.revision!==S.project.revision;$('downloadButton').disabled=!b?.success;$('openPdfButton').disabled=!b?.success;if(S.building)return;
  $('buildStatus').textContent=b?(b.success?(stale?'Changes since last build':`Compiled in ${b.seconds}s`):'Build failed'):'Ready to compile';$('buildStatus').className='build-status '+(b&&!b.success?'failed':stale?'stale':'');$('logBadge').textContent=b&&!b.success?'●':'';
  if(b?.success){const key=S.project.id+':'+b.created;if(force||S.pdfKey!==key){S.pdfKey=key;replacePdfFrame(apiPath('pdf')+'?v='+b.created+'#toolbar=0&view=FitH');}$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else if(S.keepPreview&&S.pdfKey){$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else{$('pdfEmpty').hidden=false;$('pdfFrame').hidden=true;}
+ Live.render();
 }
 async function compile({automatic=false}={}){
  if(!S.project||S.building||startingBuild||!editable())return;
  const buildPid=S.project.id,quiet=automatic&&typstProject();startingBuild=true;
  try{if(!await save()||S.project?.id!==buildPid)return;}finally{startingBuild=false;}
- clearTimeout(autoTimer);S.building=true;if(!quiet)S.keepPreview=false;
+ clearTimeout(autoTimer);S.building=true;$('downloadButton').disabled=true;if(!quiet)S.keepPreview=false;
  $('compileButton').disabled=true;$('firstCompileButton').disabled=true;$('compileButton').querySelector('span').textContent='Compiling…';$('buildStatus').textContent='Building PDF…';$('buildStatus').className='build-status';
  try{
   const result=await api('/api/projects/'+buildPid+'/compile','POST',{});
@@ -173,22 +251,22 @@ async function compile({automatic=false}={}){
   S.project=project;S.keepPreview=quiet&&!result.success&&Boolean(S.pdfKey);
   if(!result.success&&!quiet){$('logPanel').hidden=false;toast('Compilation failed. The build log has the details.');}
   else if(result.success&&!quiet)toast(`PDF compiled in ${result.seconds}s.`);
+  return Boolean(result.success&&!S.dirty&&!S.conflict&&project.build?.revision===project.revision);
  }catch(error){if(S.project?.id===buildPid){$('buildLog').textContent=error.message;if(!quiet)$('logPanel').hidden=false;}if(!quiet)throw error;}
  finally{
   S.building=false;$('compileButton').disabled=!editable();$('firstCompileButton').disabled=!editable();$('compileButton').querySelector('span').textContent='Compile';updateBuild();
   if(compileAgain){compileAgain=false;scheduleCompile();}
  }
 }
-async function projects({historyMode='push',folder=Home.folder}={}){
- if(S.project&&!await save())return;
- ++navigationId;clearTimeout(autoTimer);
+function projects({historyMode='push',folder=Home.folder}={}){return savedNavigation(async()=>{
+ Live.stop();++navigationId;clearTimeout(autoTimer);
  S.project=null;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;replacePdfFrame();clearAssetPreview();
  $('workspace').hidden=true;$('auth').hidden=true;$('projectHome').hidden=false;
  Home.visible=true;Home.folder=folder;Home.filter='all';$('projectSearch').value='';closeModal();document.title='Projects · IDSL Editor';
  setProjectRoute(projectFolderRoute(folder),historyMode);
  $('projectCount').textContent='Loading projects…';
  await refreshProjects();
-}
+});}
 function setProjectRoute(hash,mode='push'){
  if(mode==='none'||location.hash===hash)return;
  history[mode==='replace'?'replaceState':'pushState'](null,'',hash);
@@ -393,7 +471,7 @@ document.addEventListener('click',event=>{if(!event.target.closest('#fileContext
 document.addEventListener('keydown',event=>{const menu=$('fileContextMenu');if(menu.hidden)return;if(event.key==='Escape'||event.key==='Tab'){closeFileContextMenu(true);if(event.key==='Escape')event.preventDefault();return;}if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;event.preventDefault();const items=[...menu.querySelectorAll('[role=menuitem]:not(:disabled)')],index=items.indexOf(document.activeElement);items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();});
 window.addEventListener('resize',()=>closeFileContextMenu());window.addEventListener('scroll',()=>closeFileContextMenu(),{passive:true});
 
-function insert(kind){if(!editable()||!isDocument()||S.file?.content===null)return;if(S.mode==='visual'&&['bold','italic'].includes(kind)){const selection=getSelection(),node=selection?.anchorNode;const element=node?.nodeType===3?node.parentElement:node;const block=element?.closest?.('[contenteditable=true]');if(block&&$('visualEditor').contains(block)){document.execCommand(kind);block.dispatchEvent(new Event('input',{bubbles:true}));return;}}const area=$('code'),start=S.mode==='source'?area.selectionStart:S.text.length,end=S.mode==='source'?area.selectionEnd:S.text.length;editorMode('source');const selected=area.value.slice(start,end);const snippets={bold:'\\textbf{'+(selected||'bold text')+'}',italic:'\\emph{'+(selected||'italic text')+'}',heading:'\n\\section{'+(selected||'New section')+'}\n',equation:'\n\\begin{equation}\n  '+(selected||'E = mc^2')+'\n\\end{equation}\n',list:'\n\\begin{itemize}\n  \\item '+(selected||'First point')+'\n\\end{itemize}\n',citation:'\\cite{'+(selected||'citation-key')+'}',figure:'\n\\begin{figure}[ht]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{figures/example.png}\n  \\caption{'+(selected||'Your caption')+'}\n  \\label{fig:example}\n\\end{figure}\n'};const typst={bold:'*'+(selected||'bold text')+'*',italic:'_'+(selected||'italic text')+'_',heading:'\n= '+(selected||'New section')+'\n',equation:'\n$ '+(selected||'E = m c^2')+' $\n',list:'\n- '+(selected||'First point')+'\n',citation:'@'+(selected||'citation-key'),figure:'\n#figure(\n  image("figures/example.png", width: 80%),\n  caption: ['+(selected||'Your caption')+'],\n) <fig-example>\n'};area.setRangeText((isTypst()?typst:snippets)[kind],start,end,'end');setText(area.value);area.focus();}
+function insert(kind){if(!editable()||!isDocument()||S.file?.content===null)return;if(S.mode==='visual'&&['bold','italic'].includes(kind)){const selection=getSelection(),node=selection?.anchorNode;const element=node?.nodeType===3?node.parentElement:node;const block=element?.closest?.('[contenteditable=true]');if(block&&$('visualEditor').contains(block)){captureEdit('format');document.execCommand(kind);block.dispatchEvent(new Event('input',{bubbles:true}));return;}}const before=editSelection(),area=$('code'),start=S.mode==='source'?area.selectionStart:S.text.length,end=S.mode==='source'?area.selectionEnd:S.text.length;editorMode('source');const selected=area.value.slice(start,end);const snippets={bold:'\\textbf{'+(selected||'bold text')+'}',italic:'\\emph{'+(selected||'italic text')+'}',heading:'\n\\section{'+(selected||'New section')+'}\n',equation:'\n\\begin{equation}\n  '+(selected||'E = mc^2')+'\n\\end{equation}\n',list:'\n\\begin{itemize}\n  \\item '+(selected||'First point')+'\n\\end{itemize}\n',citation:'\\cite{'+(selected||'citation-key')+'}',figure:'\n\\begin{figure}[ht]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{figures/example.png}\n  \\caption{'+(selected||'Your caption')+'}\n  \\label{fig:example}\n\\end{figure}\n'};const typst={bold:'*'+(selected||'bold text')+'*',italic:'_'+(selected||'italic text')+'_',heading:'\n= '+(selected||'New section')+'\n',equation:'\n$ '+(selected||'E = m c^2')+' $\n',list:'\n- '+(selected||'First point')+'\n',citation:'@'+(selected||'citation-key'),figure:'\n#figure(\n  image("figures/example.png", width: 80%),\n  caption: ['+(selected||'Your caption')+'],\n) <fig-example>\n'};area.setRangeText((isTypst()?typst:snippets)[kind],start,end,'end');setText(area.value,false,{before,kind:'format'});area.focus();}
 async function approvedEmailsDialog(){
  const settings=await api('/api/approved-emails');
  modal('Approved IDSL Editor emails',`<p>Only these exact email addresses can register and sign in. Invitations authorize account creation; mailbox ownership is not checked.</p><form id="approvedEmailsForm"><label>One email address per line<textarea id="approvedEmailsList" class="version-preview" spellcheck="false"></textarea></label><p class="hint">Removing an address signs that member out and disables their access. Your administrator email stays approved.</p><div class="actions"><button class="primary">Save approved emails</button></div></form>`);
@@ -442,15 +520,14 @@ action('authToggle',()=>{S.authMode=S.authMode==='login'?'register':'login';rend
 window.addEventListener('hashchange',async()=>{
  const params=new URLSearchParams(location.hash.slice(1));
  try{
-  if(S.dirty&&!await save()){if(S.project)setProjectRoute('#project='+S.project.id,'replace');return;}
-  if(params.has('invite')||params.has('signup')){S.invite=params.get('invite');S.signup=params.get('signup');await authenticate();}
+  if(params.has('invite')||params.has('signup')){if(!await save()){restoreCurrentRoute();return;}S.invite=params.get('invite');S.signup=params.get('signup');await authenticate();}
   else if(S.user&&params.has('project')&&params.get('project')!==S.project?.id)await openProject(params.get('project'),{historyMode:'none'});
   else if(S.user&&!params.has('project'))await projects({historyMode:'none',folder:params.get('folder')});
  }catch(e){fail(e);}
 });
 bindFileDrop($('fileRootDrop'),null);
 action('closeModal',closeModal);action('projectsButton',projects);action('projectsNavButton',projects);action('sourceTab',()=>editorMode('source'));action('visualTab',()=>editorMode('visual'));action('saveButton',save);action('compileButton',compile);action('firstCompileButton',compile);action('shareButton',share);action('backupButton',backupDialog);action('historyButton',historyDialog);action('newFileButton',addFile);action('fileMenuButton',fileMenu);action('uploadButton',()=>$('uploadFiles').click());
-action('downloadButton',()=>{if(S.project?.build?.success)location.href=apiPath('pdf')+'?download=1';});action('openPdfButton',()=>{if(S.project?.build?.success)window.open(apiPath('pdf'),'_blank','noopener');});action('exportSourceButton',async()=>{if(await save())location.href=apiPath('source.zip');});action('logButton',async()=>{$('logPanel').hidden=!$('logPanel').hidden;if(!$('logPanel').hidden&&S.project?.build){const log=await api(apiPath('log'));$('buildLog').textContent=log.log;renderDiagnostics(log.log);}});action('closeLog',()=>$('logPanel').hidden=true);
+action('downloadButton',async()=>{const pid=S.project?.id;if(Live.active&&!await compile())return;if(S.project?.id===pid&&S.project?.build?.success)location.href=apiPath('pdf')+'?download=1';});action('openPdfButton',()=>{if(S.project?.build?.success)window.open(apiPath('pdf'),'_blank','noopener');});action('exportSourceButton',async()=>{if(await save())location.href=apiPath('source.zip');});action('logButton',async()=>{$('logPanel').hidden=!$('logPanel').hidden;if(!$('logPanel').hidden&&S.project?.build){const log=await api(apiPath('log'));$('buildLog').textContent=log.log;renderDiagnostics(log.log);}});action('closeLog',()=>$('logPanel').hidden=true);
 action('projectTitle',async()=>{if(!editable())return;const name=prompt('Project name',S.project.name);if(!name||name===S.project.name)return;await api(apiPath(),'PUT',{name});S.project=await api(apiPath());$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';});
 let accountAnchor=null;
 function closeAccountMenu(restoreFocus=false){
@@ -466,28 +543,55 @@ function positionAccountMenu(){
 }
 function accountMenu(anchor){
  const menu=$('accountDropdown'),wasOpen=!menu.hidden&&accountAnchor===anchor;closeAccountMenu();if(wasOpen)return;accountAnchor=anchor;
- menu.innerHTML=`<div class="account-menu-heading"><strong>${esc(S.user.name)}</strong><small>${esc(S.user.email)}</small></div><button id="accountProjects" role="menuitem">My projects</button><button id="accountAppearance" role="menuitem">Themes &amp; appearance</button><button id="accountBackups" role="menuitem">GitHub backups</button>${S.project?.role==='owner'?'<button id="accountProjectBackup" role="menuitem">Back up this project</button>':''}${S.canInviteLab?'<hr><button id="inviteLabMembers" role="menuitem">Invite lab members</button><button id="approvedEmailsButton" role="menuitem">Approved emails</button>':''}${S.demo?'<p class="hint">Local preview account</p>':'<hr><button id="signOut" role="menuitem">Sign out</button>'}${S.project?.role==='owner'?'<hr><button id="deleteProject" class="danger" role="menuitem">Delete project</button>':''}`;
+ menu.innerHTML=`<div class="account-menu-heading"><strong>${esc(S.user.name)}</strong><small>${esc(S.user.email)}</small></div><button id="accountProjects" role="menuitem">My projects</button><button id="accountAppearance" role="menuitem">Themes &amp; appearance</button>${!S.project?'<button id="accountBackups" role="menuitem">GitHub backups</button>':''}${S.project?.role==='owner'?'<button id="accountProjectBackup" role="menuitem">Back up this project</button>':''}${S.canInviteLab?'<hr><button id="inviteLabMembers" role="menuitem">Invite lab members</button><button id="approvedEmailsButton" role="menuitem">Approved emails</button>':''}${S.demo?'<p class="hint">Local preview account</p>':'<hr><button id="signOut" role="menuitem">Sign out</button>'}${S.project?.role==='owner'?'<hr><button id="deleteProject" class="danger" role="menuitem">Delete project</button>':''}`;
  function item(id,fn){action(id,()=>{closeAccountMenu();return fn();});}
- item('accountProjects',projects);item('accountAppearance',appearanceDialog);item('accountBackups',allBackupsDialog);if(S.project?.role==='owner')item('accountProjectBackup',backupDialog);
+ item('accountProjects',projects);item('accountAppearance',appearanceDialog);if(!S.project)item('accountBackups',allBackupsDialog);if(S.project?.role==='owner')item('accountProjectBackup',backupDialog);
  if(S.canInviteLab){item('inviteLabMembers',labSignupDialog);item('approvedEmailsButton',approvedEmailsDialog);}
- if(!S.demo)item('signOut',async()=>{if(!await save())return;await api('/api/logout','POST',{});for(const key of Object.keys(sessionStorage))if(key.startsWith('labtex-draft:'+S.user.id+':'))sessionStorage.removeItem(key);location.href='/';});
+ if(!S.demo)item('signOut',()=>savedNavigation(async()=>{await api('/api/logout','POST',{});for(const key of Object.keys(sessionStorage))if(key.startsWith('labtex-draft:'+S.user.id+':'))sessionStorage.removeItem(key);location.href='/';}));
  if(S.project?.role==='owner')item('deleteProject',async()=>{if(prompt('Type the project name to permanently delete it:')!==S.project.name)return;await api(apiPath(),'DELETE',{});S.project=null;S.file=null;S.dirty=false;history.replaceState(null,'','/');location.reload();});
  menu.hidden=false;anchor.setAttribute('aria-expanded','true');positionAccountMenu();menu.querySelector('[role=menuitem]').focus();
 }
 for(const id of ['accountButton','homeAccountButton']){const button=$(id);button.setAttribute('aria-haspopup','menu');button.setAttribute('aria-expanded','false');button.setAttribute('aria-controls','accountDropdown');action(id,()=>accountMenu(button));button.addEventListener('keydown',event=>{if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();accountMenu(button);if(event.key==='ArrowUp')$('accountDropdown').querySelector('[role=menuitem]:last-child')?.focus();}});}
-document.addEventListener('click',event=>{if(!event.target.closest('#accountDropdown,#accountButton,#homeAccountButton'))closeAccountMenu();});
+function dismissAccountMenuOutside(event){
+ const path=event.composedPath();
+ if(!['accountDropdown','accountButton','homeAccountButton'].some(id=>path.includes($(id))))closeAccountMenu();
+}
+document.addEventListener('pointerdown',dismissAccountMenuOutside,true);
+document.addEventListener('click',dismissAccountMenuOutside,true);
+// Pointer events inside preview frames stay in their document; focus leaves ours.
+window.addEventListener('blur',()=>closeAccountMenu());
 document.addEventListener('keydown',event=>{const menu=$('accountDropdown');if(menu.hidden)return;if(event.key==='Escape'){event.preventDefault();closeAccountMenu(true);return;}if(event.key==='Tab'){closeAccountMenu(true);return;}if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;event.preventDefault();const items=[...menu.querySelectorAll('[role=menuitem]')],index=items.indexOf(document.activeElement);items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();});
 window.addEventListener('resize',positionAccountMenu);window.addEventListener('scroll',()=>closeAccountMenu(),{passive:true});
-action('helpButton',()=>modal('A workspace that stays out of the way',`<p><strong>Ctrl / Cmd + S</strong> saves. <strong>Ctrl / Cmd + Enter</strong> compiles. Tab inserts two spaces in source mode.</p><p>Download your Overleaf project as a ZIP and import it from the project picker. Choose its main .tex or .typ document in the sidebar. Upload figures, bibliography files, classes, and styles with the upload button.</p><p>Visual mode supports plain paragraphs, simple bold/italic text, and headings. Equations, code, and advanced formatting stay in source blocks for both LaTeX and Typst. Editing is shared through autosave and periodic refresh, with conflict detection; this version does not merge simultaneous keystrokes.</p><p>Up to 30 saved versions per file are available, within a 40 MB history limit per project. Deleting a file removes its history. Browser drafts survive a refresh in the same tab.</p><p>This server allows 300 seconds per build, 8 MB per file, 40 MB of current files per project, and 25 owned projects per account. Shell escape is disabled.</p>`));
-$('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener('input',()=>setText($('code').value));$('code').addEventListener('scroll',syncScroll);$('code').addEventListener('click',updateStats);$('code').addEventListener('keyup',updateStats);$('code').addEventListener('keydown',e=>{if(e.key==='Tab'&&editable()){e.preventDefault();const area=e.target;area.setRangeText('  ',area.selectionStart,area.selectionEnd,'end');setText(area.value);}});document.querySelectorAll('[data-insert]').forEach(b=>{b.addEventListener('pointerdown',event=>{if(S.mode==='visual')event.preventDefault();});b.addEventListener('click',()=>insert(b.dataset.insert));});
-$('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();}catch(e){fail(e);}});
+action('helpButton',()=>modal('A workspace that stays out of the way',`<p><strong>Ctrl / Cmd + Z</strong> undoes. <strong>Ctrl / Cmd + Shift + Z</strong> or <strong>Ctrl + Y</strong> redoes. <strong>Ctrl / Cmd + S</strong> saves. <strong>Ctrl / Cmd + Enter</strong> compiles. Tab inserts two spaces in source mode.</p><p>Download your Overleaf project as a ZIP and import it from the project picker. Choose its main .tex or .typ document in the sidebar. Upload figures, bibliography files, classes, and styles with the upload button.</p><p>Visual mode supports plain paragraphs, simple bold/italic text, and headings. Equations, code, and advanced formatting stay in source blocks for both LaTeX and Typst. Editing is shared through autosave and periodic refresh, with conflict detection; this version does not merge simultaneous keystrokes.</p><p>Up to 30 saved versions per file are available, within a 40 MB history limit per project. Deleting a file removes its history. Browser drafts survive a refresh in the same tab.</p><p>This server allows 300 seconds per build, 8 MB per file, 40 MB of current files per project, and 25 owned projects per account. Shell escape is disabled.</p>`));
+// Keep editing shortcuts scoped to the document, so search and dialog fields
+// retain their normal browser undo. Capture also handles visual source blocks.
+const editorPane=document.querySelector('.editor-pane');
+editorPane.addEventListener('beforeinput',event=>{
+ if(['historyUndo','historyRedo'].includes(event.inputType)){event.preventDefault();undoEdit(event.inputType==='historyRedo');return;}
+ captureEdit(event.inputType);
+},true);
+editorPane.addEventListener('paste',()=>captureEdit('insertFromPaste'),true);
+editorPane.addEventListener('pointerdown',()=>EditHistory.breakGroup(),true);
+editorPane.addEventListener('keydown',event=>{
+ if(event.isComposing)return;
+ const key=event.key.toLowerCase(),modifier=event.ctrlKey||event.metaKey;
+ if(modifier&&!event.altKey&&(key==='z'||key==='y'&&event.ctrlKey)){
+  event.preventDefault();event.stopPropagation();undoEdit(key==='y'||event.shiftKey);return;
+ }
+ if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown'].includes(event.key))EditHistory.breakGroup();
+},true);
+$('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener('input',()=>setText($('code').value));$('code').addEventListener('scroll',syncScroll);$('code').addEventListener('click',updateStats);$('code').addEventListener('keyup',updateStats);$('code').addEventListener('keydown',e=>{if(e.key==='Tab'&&editable()){e.preventDefault();const area=e.target,before=editSelection();area.setRangeText('  ',area.selectionStart,area.selectionEnd,'end');setText(area.value,false,{before,kind:'tab'});}});document.querySelectorAll('[data-insert]').forEach(b=>{b.addEventListener('pointerdown',event=>{if(S.mode==='visual')event.preventDefault();});b.addEventListener('click',()=>insert(b.dataset.insert));});
+$('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();Live.open().then(enabled=>{if(!enabled&&$('autoCompile').checked)scheduleCompile();});}catch(e){fail(e);}});
 $('autoCompile').addEventListener('change',()=>{localStorage.setItem('labtex-auto:'+S.project.id,String($('autoCompile').checked));clearTimeout(autoTimer);if($('autoCompile').checked)compile().catch(fail);});
 $('uploadFiles').addEventListener('change',async e=>{try{if(!await save())return;let last;for(const file of e.target.files){if(file.size>8*1024*1024)throw Error(file.name+' exceeds 8 MB.');const exists=S.project.files.find(x=>x.path===file.name);if(exists&&!confirm('Replace '+file.name+'?'))continue;await api(apiPath('file'),'PUT',{path:file.name,base64:await base64File(file),revision:exists?.revision||0});last=file.name;}S.project=await api(apiPath());renderFiles();if(last)await loadFile(last,true);toast('Files uploaded.');}catch(e){fail(e);}finally{e.target.value='';}});
 $('importZip').addEventListener('change',async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>40*1024*1024)throw Error('ZIP exceeds 40 MB.');toast('Importing project…');const r=await api('/api/projects','POST',{name:file.name.replace(/\.zip$/i,''),zip:await base64File(file),folder:Home.folder});await openProject(r.id);toast('Project imported. Check the main document, then compile.');}catch(e){fail(e);}finally{e.target.value='';}});
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save().catch(fail);}if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();compile().catch(fail);}});
-window.addEventListener('beforeunload',e=>{if(S.dirty||S.saving){keepDraft();e.preventDefault();e.returnValue='';}});
+window.addEventListener('blur',flushAutosave);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)flushAutosave();});
+window.addEventListener('pagehide',flushAutosave);
+window.addEventListener('beforeunload',e=>{flushAutosave();if(S.dirty||S.saving){keepDraft();e.preventDefault();e.returnValue='';}});
 const handle=$('splitHandle');handle.addEventListener('pointerdown',e=>{handle.setPointerCapture(e.pointerId);handle.dataset.drag='1';});handle.addEventListener('pointermove',e=>{if(!handle.dataset.drag)return;const r=$('workbench').getBoundingClientRect();const percent=Math.max(25,Math.min(75,(e.clientX-r.left)/r.width*100));$('workbench').style.gridTemplateColumns=`minmax(200px,${percent}fr) 6px minmax(200px,${100-percent}fr)`;});handle.addEventListener('pointerup',()=>delete handle.dataset.drag);handle.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const p=Math.max(25,Math.min(75,Number(handle.dataset.percent||50)+(e.key==='ArrowRight'?5:-5)));handle.dataset.percent=p;$('workbench').style.gridTemplateColumns=`minmax(200px,${p}fr) 6px minmax(200px,${100-p}fr)`;}});
-setInterval(async()=>{if(!S.project||!S.user||pollBusy||movingFiles||S.building||document.hidden)return;pollBusy=true;try{const pid=S.project.id;const p=await api('/api/projects/'+pid);if(S.project?.id!==pid||movingFiles)return;$('connectionStatus').textContent='Connected';if(!S.dirty&&!S.saving&&!S.conflict){const f=p.files.find(f=>f.path===S.file?.path);if(!f){S.project=p;await loadFile(p.main,true);}else if(f.revision!==S.file.revision){S.project=p;await loadFile(f.path,true);toast('File updated by a coauthor.');}}if(S.project?.id!==pid)return;S.project=p;$('projectTitle').textContent=p.name;renderFiles();updateBuild();}catch(e){$('connectionStatus').textContent=e.status===401?'Session expired':'Connection interrupted';if(e.status===401)markSaved('Sign in again to save','error');}finally{pollBusy=false;}},4000);
+setInterval(async()=>{if(!S.project||!S.user||pollBusy||movingFiles||pendingNavigations||S.building||document.hidden)return;pollBusy=true;try{const pid=S.project.id;const p=await api('/api/projects/'+pid);if(S.project?.id!==pid||movingFiles||pendingNavigations)return;$('connectionStatus').textContent='Connected';if(!S.dirty&&!S.saving&&!S.conflict){const f=p.files.find(f=>f.path===S.file?.path);if(!f){S.project=p;await loadFile(p.main);}else if(f.revision!==S.file.revision){S.project=p;await loadFile(f.path);toast('File updated by a coauthor.');}}if(S.project?.id!==pid)return;S.project=p;$('projectTitle').textContent=p.name;renderFiles();updateBuild();}catch(e){$('connectionStatus').textContent=e.status===401?'Session expired':'Connection interrupted';if(e.status===401)markSaved('Sign in again to save','error');}finally{pollBusy=false;}},4000);
 authenticate().catch(fail);
 
 function renderDiagnostics(log){
@@ -522,8 +626,8 @@ async function saveGitHubToken(prefix){
  }
 }
 async function allBackupsDialog(){
- if(!await save())return;const [defaults,credential]=await Promise.all([api('/api/backup-settings'),api('/api/github-token')]);
- modal('Back up all projects',`<p>Back up every project you own into one GitHub repository. Each project gets its own folder. Shared projects owned by someone else are excluded. Use a private repository for private documents.</p><form id="allBackupsForm"><label>Shared GitHub repository<input id="allBackupRepo" placeholder="your-name/research-documents" value="${esc(defaults.repository)}" required></label><label>Branch<input id="allBackupBranch" placeholder="Default branch" value="${esc(defaults.branch)}"></label><label>GitHub access token<input id="allBackupToken" type="password" autocomplete="off" placeholder="Fine-grained token with Contents read/write"></label>${tokenControls('allBackup',credential)}<p class="hint">Create the repository on GitHub first. Project-specific repository settings are preserved.</p><div class="actions"><button id="saveAllBackupSettings" type="button" class="outline">Save settings</button><button id="runAllBackups" class="primary">Back up all to this repository</button></div></form><div id="allBackupResult" class="backup-result" role="status">Ready to back up your owned projects.</div>`);
+ if(S.project||!await save())return;const [defaults,credential]=await Promise.all([api('/api/backup-settings'),api('/api/github-token')]);
+ modal('Back up all projects',`<p>Back up every project you own into one GitHub repository. Each project gets its own folder under projects/, named after the project. Duplicate names receive a numbered suffix. Shared projects owned by someone else are excluded. Use a private repository for private documents.</p><form id="allBackupsForm"><label>Shared GitHub repository<input id="allBackupRepo" placeholder="your-name/research-documents" value="${esc(defaults.repository)}" required></label><label>Branch<input id="allBackupBranch" placeholder="Default branch" value="${esc(defaults.branch)}"></label><label>GitHub access token<input id="allBackupToken" type="password" autocomplete="off" placeholder="Fine-grained token with Contents read/write"></label>${tokenControls('allBackup',credential)}<p class="hint">Create the repository on GitHub first. Project-specific repository settings are preserved.</p><div class="actions"><button id="saveAllBackupSettings" type="button" class="outline">Save settings</button><button id="runAllBackups" class="primary">Back up all to this repository</button></div></form><div id="allBackupResult" class="backup-result" role="status">Ready to back up your owned projects.</div>`);
  bindTokenControls('allBackup',credential);
  async function settings(){await api('/api/backup-settings','PUT',{repository:$('allBackupRepo').value,branch:$('allBackupBranch').value});await saveGitHubToken('allBackup');}
  action('saveAllBackupSettings',async()=>{await settings();$('allBackupResult').textContent='Shared repository settings saved.';});
@@ -533,48 +637,63 @@ async function allBackupsDialog(){
    await settings();if(!(S.githubToken||S.githubSaved))throw Error('Enter your GitHub token first.');result.textContent='Backing up your owned projects…';
    const response=await api('/api/backups','POST',{token:S.githubToken,sharedOnly:true});result.replaceChildren();
    if(!response.results.length)result.textContent='You do not own any projects to back up.';
-   for(const item of response.results){const line=document.createElement('div');if(item.error){line.textContent=item.name+': '+item.error;result.classList.add('error');}else{const link=document.createElement('a');link.href=item.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=item.name+': '+(item.changed?'Snapshot saved':'Already up to date')+' → '+item.repository;line.append(link);}result.append(line);}
+   for(const item of response.results){const line=document.createElement('div');if(item.error){line.textContent=item.name+': '+item.error;result.classList.add('error');}else{const link=document.createElement('a');link.href=item.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=item.name+': '+(item.changed?'Snapshot saved':'Already up to date')+' → '+item.repository+(item.folder?'/'+item.folder:'');line.append(link);}result.append(line);}
   }catch(error){result.textContent=error.message;result.classList.add('error');}finally{button.disabled=false;saveButton.disabled=false;}
  });
 }
 async function backupDialog(){
  if(!S.project||S.project.role!=='owner')return;
  if(!await save())return;
- const [defaults,project,credential]=await Promise.all([api('/api/backup-settings'),api(apiPath('backup-settings')),api('/api/github-token')]);
- modal('GitHub backups',`<p>Keep your project source and assets in GitHub, with commit history. Local accounts, passwords, and build files stay on this computer. Use a private repository for private documents.</p>
+ const pid=S.project.id,projectName=S.project.name,path='/api/projects/'+pid;
+ const [project,credential]=await Promise.all([api(path+'/backup-settings'),api('/api/github-token')]);
+ let busy=false;
+ modal('Back up this project',`<p>Back up <strong>${esc(projectName)}</strong> to GitHub. These actions update only this project.</p>
  <form id="backupForm"><div class="backup-options">
- <label>My shared repository<input id="backupSharedRepo" placeholder="your-name/research-documents" value="${esc(defaults.repository)}"></label>
- <label>Shared repository branch<input id="backupSharedBranch" placeholder="Default branch" value="${esc(defaults.branch)}"></label>
- <label>This project's layout<select id="backupMode"><option value="shared">Use my shared repository · one folder per project</option><option value="separate">Use a separate repository for this project</option></select></label>
+ <section id="projectGlobalBackup" class="project-global-backup" aria-label="Global backup status"></section>
+ <label>This project's backup destination<select id="backupMode"><option value="shared">Shared repository · this project's folder only</option><option value="separate">Separate repository for this project</option></select></label>
  <div id="separateBackup"><label>Project repository<input id="backupProjectRepo" placeholder="your-name/this-paper" value="${esc(project.repository)}"></label><label>Project branch<input id="backupProjectBranch" placeholder="Default branch" value="${esc(project.branch)}"></label></div>
  <p id="backupPath" class="hint backup-destination"></p>
  <label>GitHub access token<input id="backupToken" type="password" autocomplete="off" placeholder="Fine-grained token with Contents read/write"></label>
  ${tokenControls('backup',credential)}
- <label class="backup-check"><input id="backupAuto" type="checkbox"> Back up 30 seconds after saving while this tab is open</label>
- </div><div class="row"><button type="submit" class="outline">Save settings</button><button type="button" id="backupCurrent" class="primary">Back up this project</button><button type="button" id="backupAll" class="outline">Back up all my projects</button></div></form>
+ <label class="backup-check"><input id="backupAuto" type="checkbox"> Back up this project 30 seconds after saving while this tab is open</label>
+ </div><div class="row"><button type="submit" class="outline">Save settings</button><button type="button" id="backupCurrent" class="primary">Back up this project</button></div></form>
  <div id="backupResult" class="backup-result" role="status">${project.last_url?`Last snapshot: <a href="${esc(project.last_url)}" target="_blank" rel="noopener noreferrer">${esc(project.last_commit.slice(0,8))}</a> · revision ${project.last_revision}`:'No GitHub snapshot recorded for this project yet.'}</div>`);
+ function renderGlobal(status){
+  const panel=$('projectGlobalBackup');if(!panel)return;
+  if(!status?.included){panel.innerHTML='<strong>Global backup</strong><p>No shared repository configured. Set it from the project explorer’s account menu. You can use a separate repository here.</p>';return;}
+  const snapshot=status.snapshot;
+  let message=!snapshot?'Included in all-project backups; no verified snapshot has been recorded yet.':!snapshot.updated?'An earlier snapshot exists in this repository. Update it to verify the current branch.':status.stale||S.dirty?'Changes since this project’s last global backup.':'This project’s saved changes are backed up.';
+  panel.innerHTML=`<strong>Included in global backup</strong><p id="globalBackupRepository">${esc(status.repository)} · ${esc(status.branch||'default branch')}</p><p id="globalBackupStatus">${esc(message)}</p>${snapshot?`<p class="hint">${snapshot.folder?esc(snapshot.folder)+' · ':''}<a href="${esc(snapshot.last_url)}" target="_blank" rel="noopener noreferrer">Last snapshot ${esc(snapshot.last_commit.slice(0,8))}</a> · revision ${snapshot.last_revision}</p>`:''}<button id="updateGlobalBackup" type="button" class="outline">Update this project in global backup</button><p class="hint">Updates only this project’s folder. Manage all-project backups in the project explorer.</p>`;
+  $('updateGlobalBackup').disabled=busy;action('updateGlobalBackup',()=>run(true));
+ }
+ renderGlobal(project.global_backup);
  $('backupMode').value=project.mode;bindTokenControls('backup',credential);$('backupAuto').checked=S.backupAuto;
- function layout(){const shared=$('backupMode').value==='shared';$('separateBackup').hidden=shared;$('backupPath').textContent=shared?'Sources go in projects/'+S.project.id+'/; other projects keep their own folders.':'Sources go at the repository root. Existing unrelated files are preserved.';}
+ function layout(){const shared=$('backupMode').value==='shared';$('separateBackup').hidden=shared;$('backupPath').textContent=shared?'Sources go in projects/ under the project name. Duplicate names receive a number.':'Sources go at the repository root. Existing unrelated files are preserved.';}
  layout();$('backupMode').addEventListener('change',layout);
  async function saveSettings(){
-  await api('/api/backup-settings','PUT',{repository:$('backupSharedRepo').value,branch:$('backupSharedBranch').value});
-  await api(apiPath('backup-settings'),'PUT',{mode:$('backupMode').value,repository:$('backupProjectRepo').value,branch:$('backupProjectBranch').value});
+  if(S.project?.id!==pid)throw Error('Open this project again before backing it up.');
+  await api(path+'/backup-settings','PUT',{mode:$('backupMode').value,repository:$('backupProjectRepo').value,branch:$('backupProjectBranch').value});
   await saveGitHubToken('backup');S.backupAuto=$('backupAuto').checked;
   if(S.backupAuto&&!(S.githubToken||S.githubSaved)){S.backupAuto=false;throw Error('Enter a token or reuse a saved token to enable automatic backups for this tab.');}
   if(!S.backupAuto){for(const timer of backupTimers.values())clearTimeout(timer);backupTimers.clear();}
  }
  $('backupForm').addEventListener('submit',async event=>{event.preventDefault();try{await saveSettings();$('backupResult').textContent='Backup settings saved. Back up now to create a snapshot.';}catch(e){$('backupResult').textContent=e.message;}});
- async function run(all){
-  $('backupCurrent').disabled=true;$('backupAll').disabled=true;$('backupResult').classList.remove('error');
+ async function run(global=false){
+  if(busy||S.project?.id!==pid)return;busy=true;
+  $('backupCurrent').disabled=true;if($('updateGlobalBackup'))$('updateGlobalBackup').disabled=true;$('backupResult').classList.remove('error');
   try{
-   await saveSettings();if(!(S.githubToken||S.githubSaved))throw Error('Enter your GitHub token first.');
-   $('backupResult').textContent=all?'Backing up your owned projects…':'Creating GitHub snapshot…';
-   const result=await api(all?'/api/backups':apiPath('backup'),'POST',{token:S.githubToken});
-   const results=all?result.results:[result];$('backupResult').replaceChildren();
-   for(const item of results){const line=document.createElement('div');if(item.error){line.textContent=(item.name||item.id)+': '+item.error;$('backupResult').classList.add('error');}else{const link=document.createElement('a');link.href=item.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=(item.name||S.project.name)+': '+(item.changed?'Snapshot saved':'Already up to date')+' → '+item.repository+' ('+item.commit.slice(0,8)+')';line.append(link);}$('backupResult').append(line);}
-  }catch(e){$('backupResult').classList.add('error');$('backupResult').textContent=e.message;}finally{$('backupCurrent').disabled=false;$('backupAll').disabled=false;}
+   if(!await save())return;
+   if(global)await saveGitHubToken('backup');else await saveSettings();
+   if(!(S.githubToken||S.githubSaved))throw Error('Enter your GitHub token first.');
+   $('backupResult').textContent=global?'Updating this project in the global backup…':'Creating this project’s GitHub snapshot…';
+   const body={token:S.githubToken};if(global)body.sharedOnly=true;
+   const result=await api(path+'/backup','POST',body);
+   if(S.project?.id!==pid||!$('backupResult'))return;
+   const link=document.createElement('a');link.href=result.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=(result.name||projectName)+': '+(result.changed?'Snapshot saved':'Already up to date')+' → '+result.repository+(result.folder?'/'+result.folder:'')+' ('+result.commit.slice(0,8)+')';$('backupResult').replaceChildren(link);
+   const latest=await api(path+'/backup-settings');if(S.project?.id===pid)renderGlobal(latest.global_backup);
+  }catch(e){if($('backupResult')){$('backupResult').classList.add('error');$('backupResult').textContent=e.message;}}finally{busy=false;if($('backupCurrent'))$('backupCurrent').disabled=false;if($('updateGlobalBackup'))$('updateGlobalBackup').disabled=false;}
  }
- action('backupCurrent',()=>run(false));action('backupAll',()=>run(true));
+ action('backupCurrent',()=>run());
 }
 
 // The project explorer is a page, with browser-history navigation to editors.

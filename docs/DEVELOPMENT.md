@@ -1,6 +1,6 @@
 # Development and release validation
 
-The runtime is Python's standard library plus plain browser JavaScript. There is no production npm/pip dependency tree. Linux compiler and tunnel downloads are pinned in `deploy/dependencies.json`; Mac compilers are pinned in `deploy/local-dependencies.json`. See [local development](LOCAL.md) for the Mac runner and isolated browser suite.
+The runtime is Python's standard library plus plain browser JavaScript. There is no production npm/pip dependency tree. On Mac, the verified Tinymist executable provides a persistent compiler, LSP, and bundled live renderer. Linux compiler and tunnel downloads are pinned in `deploy/dependencies.json`; Mac compilers are pinned in `deploy/local-dependencies.json`. See [local development](LOCAL.md) for the Mac runner and isolated browser suite.
 
 ## Automated tests
 
@@ -18,7 +18,7 @@ CI runs the backend/installer tests with a distribution TeX Live installation. N
 
 ## Browser regression test
 
-On Mac, after compiler setup, run all eleven browser suites against a temporary database:
+On Mac, after compiler setup, run the thirteen PDF-fallback browser suites against a temporary database:
 
 ```sh
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
@@ -28,6 +28,16 @@ python3 tests/run_browser.py
 
 This covers LaTeX/Typst editing and real builds, the project explorer and navigation, and appearance preferences (one-click Light/Dark switching, System in account settings, reload persistence, device changes, tab synchronization, and mobile controls). PDF preview checks also cover its independent dark-color switch, persistence, tab synchronization, and unchanged downloaded PDF bytes. It leaves `data/` untouched. Install Playwright separately and use Node 20+; set `CHROME_BIN` when using an existing Chromium browser.
 
+`browser_undo.cjs` checks Ctrl/Cmd+Z, redo with Ctrl/Cmd+Shift+Z or Ctrl+Y, grouped typing/deletion, selections, toolbar and Tab edits, autosave, separate file histories, coauthor updates, visual paragraphs/source blocks, and switching between source and visual modes. Use `python3 tests/run_browser.py --editor-undo` with the same environment for just these checks. Undo history stays in memory, bounded to 100 steps per file and eight recent files; reloading starts a fresh history.
+
+`browser_autosave.cjs` checks Source/Visual edits in both formats, immediate navigation exits, continued typing during an in-flight save, periodic saving without a typing pause, focus-loss and page-unload saves, delayed file loads, browser Back/Forward, temporary server failures, and coauthor conflict protection. Run just these checks with `python3 tests/run_browser.py --editor-save`. App navigation holds the current editor until its final save and next load finish; small file writes use fetch keepalive, and pending/large writes retain the browser leave warning.
+
+Run the additional native Tinymist suite with the same environment and `python3 tests/run_browser.py --live-typst`. It checks a real WebSocket-rendered document, updates within the same iframe/session with no per-edit PDF requests, completion (including snippet expansion), hover, definitions, formatting, undo/redo of language-tool edits and preview updates after undo, diagnostics/recovery, source reveal, account-menu dismissal on preview clicks, dark preview, project-named PDF export, and worker cleanup. Both modes use disposable databases and fictional documents.
+
+`tests/test_tinymist.py` runs real native tests when `TINYMIST_BIN` is available on macOS (`./labtex test` supplies it). It checks in-memory edits without overwriting saved source, watcher invalidation for imported files, persistent process reuse, PDF compilation, authentication/roles, account-scoped session IDs, bounded buffers, request allowlisting, crash recovery, and temporary-directory/process cleanup. Linux CI skips these native checks; it continues testing the isolated PDF path.
+
+`typst_service.py` owns each session's stdio JSON-RPC, memory overlays, watched project mirror, and authenticated preview proxy. `web/typst-live.js` supplies language controls and embeds Tinymist's bundled renderer. Browser clients can only request a fixed set of language queries; worker commands, filesystem paths, and preview host arguments are server-owned. The native preview protocol and renderer version move together in the pinned Tinymist binary. Recheck protocol behavior and both Mac architecture hashes when updating it.
+
 File-tree checks cover nested folder controls, keyboard operation, persistence across refreshes and projects, and search results inside collapsed folders. They also check raster/SVG previews, optional SVG source, restoration of document editing mode, unchanged image bytes, and that SVG scripts/external references do not execute.
 
 `browser_project_folders.cjs` checks nested project folders, breadcrumbs, move dialogs and drag/drop, folder links and browser history, search across folders, creation/import into the current folder, rename/reparent, empty-folder deletion, and grid/list/dark/mobile views. It also verifies that moving a project leaves its content and revision unchanged.
@@ -36,9 +46,9 @@ File-tree checks cover nested folder controls, keyboard operation, persistence a
 
 `browser_project_actions.cjs` checks explorer Rename/Move/Delete menus in grid/list and dark/mobile views, keyboard dismissal, name validation, persistence, shared permissions, request failures, typed deletion confirmation, and preservation of unrelated projects. It only deletes fictional disposable fixtures.
 
-`browser_library_layout.cjs` checks library search and format filtering, creation only on request, current-folder copies, account-menu keyboard navigation and dismissal, equal folder/project tile sizes, and footer clearance at desktop, laptop, and mobile viewport sizes. All eight starter templates are compiled in backend tests.
+`browser_library_layout.cjs` checks library search and format filtering, creation only on request, current-folder copies, account-menu keyboard navigation, outside pointer dismissal (including PDF-pane clicks), equal folder/project tile sizes, and footer clearance at desktop, laptop, and mobile viewport sizes. All eight starter templates are compiled in backend tests.
 
-`browser_file_actions.cjs` verifies right-click and keyboard menus, rename collisions, file download, replacement history and conflict protection, deletion confirmation, the main-document guard, viewer permissions, and mobile bounds. PDF and source ZIP exports are checked for project-based filenames. `browser_drag_live.cjs` covers editor file/folder moves, explorer folder moves and parent/root navigation, desktop/mobile action rows, Typst typing debounce and queued builds, retained previews during syntax errors, backup menus, and saved-token reuse/removal. Browser fixtures inject a temporary file credential store; they never access real Keychain entries. Backend checks cover account isolation and credential persistence, with no live GitHub writes.
+`browser_file_actions.cjs` verifies right-click and keyboard menus, rename collisions, file download, replacement history and conflict protection, deletion confirmation, the main-document guard, viewer permissions, and mobile bounds. PDF and source ZIP exports are checked for project-based filenames. `browser_drag_live.cjs` covers editor file/folder moves, explorer folder moves and parent/root navigation, desktop/mobile action rows, Typst typing debounce and queued builds, retained previews during syntax errors, backup menus, and saved-token reuse/removal. Use `python3 tests/run_browser.py --backup-ui` with the same environment for the focused backup UI suites. Browser fixtures inject a temporary file credential store; they never access real Keychain entries. Backend checks cover account isolation and credential persistence, with no live GitHub writes. Project backup-status checks verify that shared snapshot records survive restarts, remain separate from per-project destination settings, report pending changes and destination changes, preserve previous snapshots on failure, migrate older records without claiming branch verification, and enforce owner-only access. GitHub snapshot tests model readable project folders, stable duplicate suffixes, Unicode/path sanitization, atomic migration from ID folders, project renames, unrelated-file preservation, blob reuse, and failed concurrent updates.
 
 Bundled starters live under `templates/`; `project_templates.py` lists their public metadata and loads only those fixed directories. Keep personal source out of this catalog. Preserve upstream notices and update recorded hashes deliberately when replacing Touying or the NeurIPS author kit. The release checker permits only the original upstream author contact in each specific attribution file, and the Western logo as a reviewed template image.
 
@@ -73,6 +83,8 @@ python3 tests/run_browser.py --screenshots
 ```
 
 This runs `tests/capture_docs.cjs` instead of the regression suites. It requires a fresh database, creates only fictional `example.test` demo accounts and starter documents, captures grid/list/mobile project views, both editors (a classic LaTeX article is the main README image), the template library, account dropdown, visual mode, sharing, GitHub settings, dark mode, the palette picker, and the Western/NeurIPS starters into `docs/images/`, then discards the database. It never uses the personal installation or writes to GitHub. The backup screenshot leaves its token field empty; sharing screenshots must not show generated invitation links.
+
+The native suite also writes `artifacts/tinymist-live.png`; after inspecting it, copy it to `docs/images/typst-live.png`. Keep the classic LaTeX editor as the main README image.
 
 Inspect every screenshot before publishing. Check image metadata as well as visible pixels; never capture live projects or use redaction as a substitute for a disposable fixture.
 

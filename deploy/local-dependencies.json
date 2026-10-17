@@ -9,6 +9,11 @@
       "version": "0.17.0",
       "url": "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.17.0/tectonic-0.17.0-aarch64-apple-darwin.tar.gz",
       "sha256": "a3f1cac7c5678f01661a92212f58480ae3b0634115d880dbc59e2953ded45667"
+    },
+    "tinymist": {
+      "version": "0.15.10",
+      "url": "https://github.com/Myriad-Dreamin/tinymist/releases/download/v0.15.10/tinymist-aarch64-apple-darwin.tar.gz",
+      "sha256": "34f5cd17610efca7b5f742a664a9fc31827327f3eebbc886cfcf2c6be69dd27e"
     }
   },
   "x86_64": {
@@ -21,6 +26,11 @@
       "version": "0.17.0",
       "url": "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.17.0/tectonic-0.17.0-x86_64-apple-darwin.tar.gz",
       "sha256": "7c90ef5b6ddb1eb1937e4337add5237b79338e4b9676459fa91187d24d6cdf80"
+    },
+    "tinymist": {
+      "version": "0.15.10",
+      "url": "https://github.com/Myriad-Dreamin/tinymist/releases/download/v0.15.10/tinymist-x86_64-apple-darwin.tar.gz",
+      "sha256": "b71ff6e4aee54b2674c225c54a3d6be455c5dd4a991e8544233d6f09d10b555e"
     }
   }
 }

@@ -82,3 +82,16 @@ dialog.template-library-dialog{width:900px;max-width:calc(100vw - 24px)}
 
 .home-action-row{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:18px}.home-action-row .home-heading-actions{width:auto}.home-action-row .home-view-tools{width:auto}.home-action-row .home-view-tools{margin-left:auto}.home-action-row .home-heading-actions button{padding:10px 14px}
 @media(max-width:760px){.home-action-row{gap:12px}.home-action-row .home-heading-actions{width:100%}.home-action-row .home-view-tools{width:100%}}
+
+/* Persistent Typst preview and LSP controls. */
+#typstFrame{border:0;width:100%;height:100%;background:#e7e7e7;display:block}#typstFrame[hidden]{display:none}
+.project-global-backup{padding:14px;border:1px solid var(--line);border-radius:7px;background:var(--paper);overflow-wrap:anywhere}.project-global-backup p{margin:7px 0;font-size:12px;line-height:1.5}.project-global-backup .hint{font-size:11px}.project-global-backup button{margin-top:4px}
+dialog:has(#backupForm){width:min(760px,94vw)}#backupForm .backup-options{gap:10px;margin:14px 0}#backupForm .backup-options>p{margin:0}#backupForm .project-global-backup p{margin:5px 0}
+#backupForm .text-button{padding:4px 6px}
+#pdfPreview.pdf-dark #typstFrame{filter:invert(.92) hue-rotate(180deg)}
+.typst-tools{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:5px 12px;border-bottom:1px solid var(--line);background:var(--paper);font-size:9px;flex:none}.typst-tools[hidden]{display:none}.typst-tools>span{color:var(--muted);margin-right:auto}.typst-tools button{border:1px solid var(--line);border-radius:4px;padding:4px 6px;font-size:9px}
+.typst-preview-switch{display:flex;border:1px solid var(--line);border-radius:5px;padding:2px;font-size:10px;flex:none}.typst-preview-switch[hidden]{display:none}.typst-preview-switch button{font-size:10px;padding:4px 7px;border-radius:3px}.typst-preview-switch button[aria-pressed=true]{background:var(--mint);color:var(--green)}
+.typst-problems{flex:none;max-height:104px;overflow:auto;border-bottom:1px solid var(--line);padding:4px 12px}.typst-diagnostic{display:block;text-align:left;font:10px/1.5 var(--mono);color:var(--ink);padding:3px 0;width:100%;white-space:pre-wrap}
+.typst-documentation{position:relative;flex:none;max-height:160px;overflow:auto;background:var(--paper);border-bottom:1px solid var(--line);padding:10px 14px}.typst-documentation>.icon{position:absolute;right:5px;top:5px}.typst-documentation pre{white-space:pre-wrap;margin:0 25px 0 0;font:11px/1.6 var(--mono)}
+.code-area{position:relative}.typst-completions{position:absolute;z-index:15;left:20px;max-height:170px;min-width:200px;max-width:90%;overflow:auto;background:var(--paper);border:1px solid var(--line);box-shadow:0 7px 20px #0003;border-radius:5px}.typst-completions button{display:block;width:100%;text-align:left;font:11px/1.6 var(--mono);padding:5px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.typst-completions button[aria-selected=true]{background:var(--mint);color:var(--green)}
+@media(max-width:900px){.typst-tools{padding:5px 8px}.typst-tools>span{flex-basis:100%}.typst-preview-switch button{padding:4px}.preview-pane .pane-header:has(#typstPreviewSwitch:not([hidden])) .preview-title{display:none}}

@@ -10,6 +10,7 @@ from core import Problem, MAX_FILE, MAX_PROJECT, MAX_FILES, SAMPLE, TYPST_SAMPLE
 from github_backup import destination, GitHub, backup_snapshot
 from project_templates import TEMPLATES, template_files
 from credential_store import token_store, valid_token
+from typst_service import TypstService
 ROOT=Path(__file__).resolve().parent
 MAX_OWNED_PROJECTS=25
 MAX_PROJECT_FOLDERS=100
@@ -43,6 +44,9 @@ class BoundedHTTPServer(ThreadingHTTPServer):
     def process_request_thread(self,request,address):
         try: super().process_request_thread(request,address)
         finally: self.slots.release()
+    def server_close(self):
+        if getattr(self,'app',None): self.app.typst.close()
+        super().server_close()
 
 def digest(s): return hashlib.sha256(s.encode()).hexdigest()
 def password_hash(p,salt=None):
@@ -63,6 +67,7 @@ class App:
         self.data=Path(data).resolve(); self.data.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.path=self.data/'labtex.sqlite3'; self.origin=origin.rstrip('/'); self.compiler_url=compiler_url; self.demo=demo
         self.tokens=token_store(self.data)
+        self.typst=TypstService(self)
         self.setup_token=os.getenv('SETUP_TOKEN') or secrets.token_urlsafe(24)
         self.lock=threading.Lock(); self.jobs=set(); self.attempts={}
         with self.db() as db:
@@ -80,11 +85,19 @@ CREATE TABLE IF NOT EXISTS lab_invites(id TEXT PRIMARY KEY,token TEXT UNIQUE,cre
 CREATE TABLE IF NOT EXISTS approved_emails(email TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS backup_settings(user_id TEXT PRIMARY KEY,repository TEXT,branch TEXT);
 CREATE TABLE IF NOT EXISTS project_backups(project_id TEXT PRIMARY KEY,mode TEXT,repository TEXT,branch TEXT,last_commit TEXT,last_url TEXT,last_revision INTEGER);
+CREATE TABLE IF NOT EXISTS shared_project_backups(project_id TEXT,repository TEXT,branch TEXT,folder TEXT,last_commit TEXT,last_url TEXT,last_revision INTEGER,updated REAL NOT NULL DEFAULT 0,PRIMARY KEY(project_id,repository,branch));
 CREATE TABLE IF NOT EXISTS project_folders(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,name TEXT NOT NULL,parent_id TEXT,updated REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS project_locations(user_id TEXT,project_id TEXT,folder_id TEXT,PRIMARY KEY(user_id,project_id));
 CREATE INDEX IF NOT EXISTS project_folders_parent ON project_folders(user_id,parent_id);
 CREATE INDEX IF NOT EXISTS project_locations_folder ON project_locations(user_id,folder_id);
 ''')
+            # Older shared snapshots did not track their destination separately.
+            # Retain matching repository history without claiming branch verification.
+            db.execute('''INSERT OR IGNORE INTO shared_project_backups
+SELECT b.project_id,s.repository,s.branch,'',b.last_commit,b.last_url,b.last_revision,0
+FROM project_backups b JOIN projects p ON p.id=b.project_id JOIN backup_settings s ON s.user_id=p.owner
+WHERE b.mode='shared' AND b.last_commit IS NOT NULL AND s.repository!=''
+AND b.last_url='https://github.com/'||s.repository||'/commit/'||b.last_commit''')
             # Upgrade existing installations: the original account manages lab signup.
             db.execute("INSERT OR IGNORE INTO settings SELECT 'lab_admin_id',id FROM users WHERE id!='demo' ORDER BY rowid LIMIT 1")
             if not db.execute("SELECT 1 FROM settings WHERE key='email_policy_initialized'").fetchone():
@@ -238,7 +251,17 @@ CREATE INDEX IF NOT EXISTS project_locations_folder ON project_locations(user_id
         finally:
             with self.lock: self.jobs.discard(pid)
 
-    def backup(self,pid,user,token,shared_target=None):
+    def shared_backup_status(self,db,project,user):
+        target=db.execute('SELECT repository,branch FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone()
+        if not target or not target['repository']:
+            return {'included':False,'repository':'','branch':'','snapshot':None,'stale':False}
+        row=db.execute('SELECT folder,last_commit,last_url,last_revision,updated FROM shared_project_backups WHERE project_id=? AND repository=? AND branch=?',
+                       (project['id'],target['repository'],target['branch'])).fetchone()
+        snapshot=dict(row) if row else None
+        return {'included':True,**dict(target),'snapshot':snapshot,
+                'stale':not snapshot or not snapshot['updated'] or snapshot['last_revision']!=project['revision']}
+
+    def backup(self,pid,user,token,shared_target=None,client=None):
         key='backup:'+pid
         with self.lock:
             if key in self.jobs: raise Problem('This project is already being backed up.',429)
@@ -253,10 +276,13 @@ CREATE INDEX IF NOT EXISTS project_locations_folder ON project_locations(user_id
                 if not target: raise Problem('Set your GitHub backup destination first.')
                 target=dict(target)
                 files={r['path']:r['content'] for r in db.execute('SELECT path,content FROM files WHERE project_id=?',(pid,))}
-            result=backup_snapshot(GitHub(token),target,project,files,shared)
+            result=backup_snapshot(client or GitHub(token),target,project,files,shared)
             with self.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 self.access(db,pid,user,owner=True)
+                if shared:
+                    db.execute('INSERT OR REPLACE INTO shared_project_backups VALUES(?,?,?,?,?,?,?,?)',
+                               (pid,target['repository'],target['branch'],result.get('folder',''),result['commit'],result['url'],project['revision'],time.time()))
                 current=db.execute('SELECT * FROM project_backups WHERE project_id=?',(pid,)).fetchone()
                 current_shared=not current or current['mode']=='shared'
                 current_target=db.execute('SELECT * FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone() if current_shared else current
@@ -348,7 +374,7 @@ class Handler(BaseHTTPRequestHandler):
                 public=method=='POST' and path in PUBLIC_POSTS
                 if not public:
                     with self.app.db() as db: self.user(db)
-                large=(path=='/api/projects' and method=='POST') or (method=='PUT' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/file',path))
+                large=(path=='/api/projects' and method=='POST') or (method=='PUT' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/file',path)) or (method=='POST' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/typst/[a-f0-9]{32}',path))
                 data=self.body(58*1024*1024 if large else (16384 if public else 65536))
             self.body_deadline.cancel()
             result=self.route(method,path,urllib.parse.parse_qs(url.query),data)
@@ -360,6 +386,56 @@ class Handler(BaseHTTPRequestHandler):
             import traceback; traceback.print_exc(); self.send({'error':'The server could not complete this request.'},500)
     def route(self,method,path,query,data):
         app=self.app
+        live=re.fullmatch(r'/api/projects/([a-f0-9]{24})/typst(?:/([a-f0-9]{32})(/preview/)?)?',path)
+        if live:
+            pid,sid,preview=live.groups()
+            with app.db() as db:
+                user=self.user(db);project=app.access(db,pid,user,write=True)
+                if sid: session=app.typst.get(user['id'],pid,sid)
+                changed=not sid or session.revision!=project['revision']
+                files={row['path']:row['content'] for row in db.execute('SELECT path,content FROM files WHERE project_id=?',(pid,))} if changed else None
+            if not sid:
+                if method!='POST': raise Problem('Not found.',404)
+                session=app.typst.open(user['id'],project,files)
+                return {**session.state(),'preview':f'/api/projects/{pid}/typst/{session.id}/preview/'}
+            if changed:
+                if session.main!=project['main']:
+                    app.typst.remove(session);raise Problem('Main document changed. Reconnect the live preview.',409)
+                session.sync(project,files)
+            if preview:
+                if method!='GET': raise Problem('Not found.',404)
+                if self.headers.get('Upgrade','').lower()=='websocket':
+                    def authorized():
+                        try:
+                            with app.db() as db:
+                                current=self.user(db);app.access(db,pid,current,write=True)
+                                return current['id']==session.user_id
+                        except Problem: return False
+                    session.tunnel(self,authorized)
+                else:
+                    html,policy=session.preview_html(path)
+                    self.send(html,kind='text/html; charset=utf-8',headers={'Content-Security-Policy':policy})
+                return
+            if method=='DELETE':
+                app.typst.remove(session);return {'ok':True}
+            if method=='GET': return session.state()
+            if method!='POST': raise Problem('Not found.',404)
+            operation=data.get('operation')
+            if operation=='close':
+                app.typst.remove(session);return {'ok':True}
+            if operation=='change':
+                session.change(data.get('path'),data.get('content'),data.get('sequence'))
+                return session.state()
+            if operation=='query':
+                return {'result':session.query(data.get('method'),data.get('path'),data.get('position'))}
+            if operation=='reveal':
+                source=safe_path(data.get('path'))
+                if source not in session.files: raise Problem('File not found.',404)
+                position=data.get('position',{})
+                if any(type(position.get(key)) is not int or not 0<=position[key]<=MAX_FILE for key in ('line','character')): raise Problem('Invalid editor position.')
+                session.request('workspace/executeCommand',{'command':'tinymist.scrollPreview','arguments':[session.id,{'event':'panelScrollTo','filepath':str(session.root/source),**position}]})
+                return {'ok':True}
+            raise Problem('Unsupported live editor operation.')
         if path=='/api/github-token':
             with app.db() as db: user=self.user(db)
             if app.demo: raise Problem('Saving GitHub tokens is disabled in local preview.',403)
@@ -379,19 +455,27 @@ class Handler(BaseHTTPRequestHandler):
                     if not target or not target['repository']: raise Problem('Set your shared GitHub repository first.')
                     shared_target=dict(target)
             token=app.backup_token(user,data.get('token'))
+            client=GitHub(token)
             results=[]
             for project in projects:
                 pid=project['id']
-                try: results.append({'id':pid,**app.backup(pid,user,token,shared_target)})
+                try: results.append({'id':pid,**app.backup(pid,user,token,shared_target,client=client)})
                 except Problem as error: results.append({'id':pid,'name':project['name'],'error':str(error)})
             return {'results':results}
         backup_match=re.fullmatch(r'/api/projects/([a-f0-9]{24})/backup',path)
         if backup_match and method=='POST':
+            shared_only=data.get('sharedOnly',False)
+            if type(shared_only) is not bool: raise Problem('Choose a valid backup layout.')
             with app.db() as db:
                 user=self.user(db);app.access(db,backup_match[1],user,owner=True)
-            return app.backup(backup_match[1],user,app.backup_token(user,data.get('token')))
+                target=None
+                if shared_only:
+                    row=db.execute('SELECT * FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone()
+                    if not row or not row['repository']: raise Problem('Set your shared GitHub repository from the project explorer first.')
+                    target=dict(row)
+            return app.backup(backup_match[1],user,app.backup_token(user,data.get('token')),shared_target=target)
         if method=='GET' and not path.startswith('/api/'):
-            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
+            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/edit-history.js':'edit-history.js','/typst-live.js':'typst-live.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
             if path not in allowed: raise Problem('Not found.',404)
             f=ROOT/'web'/allowed[path]; self.send(f.read_bytes(),kind=mimetypes.guess_type(f)[0] or 'text/plain'); return
         with app.db() as db:
@@ -424,6 +508,7 @@ class Handler(BaseHTTPRequestHandler):
                     app.new_project(db,user['id'],'My first paper' if path=='/api/register-lab' else 'A space for your next idea',SAMPLE)
                 result,headers=self.login(db,user); db.commit(); self.send(result,headers=headers); return
             user=self.user(db)
+            if path=='/api/typst-capabilities' and method=='GET': return app.typst.capabilities()
             if path=='/api/templates' and method=='GET': return {'templates':list(TEMPLATES)}
             if path=='/api/project-folders':
                 if method=='GET': return {'folders':[dict(row) for row in db.execute('SELECT id,name,parent_id AS parent,updated FROM project_folders WHERE user_id=? ORDER BY name,id',(user['id'],))]}
@@ -489,6 +574,7 @@ class Handler(BaseHTTPRequestHandler):
                     db.execute('DELETE FROM lab_invites WHERE id=?',(str(data.get('id','')),));return {'ok':True}
                 raise Problem('Not found.',404)
             if path=='/api/logout' and method=='POST':
+                app.typst.discard(user_id=user['id'])
                 cookie=SimpleCookie(self.headers.get('Cookie',''))
                 if 'labtex_session' in cookie: db.execute('DELETE FROM sessions WHERE token=?',(digest(cookie['labtex_session'].value),))
                 self.send({'ok':True},headers={'Set-Cookie':self.cookie('',0)}); return
@@ -531,7 +617,8 @@ class Handler(BaseHTTPRequestHandler):
                                (pid,mode,repository,branch,previous['last_commit'] if keep else None,previous['last_url'] if keep else None,previous['last_revision'] if keep else None))
                 elif method!='GET': raise Problem('Not found.',404)
                 row=db.execute('SELECT * FROM project_backups WHERE project_id=?',(pid,)).fetchone()
-                return dict(row) if row else {'mode':'shared','repository':'','branch':'','last_commit':None,'last_url':None,'last_revision':None}
+                settings=dict(row) if row else {'mode':'shared','repository':'','branch':'','last_commit':None,'last_url':None,'last_revision':None}
+                return {**settings,'global_backup':app.shared_backup_status(db,p,user)}
             if action is None:
                 if method=='GET':
                     p['files']=[dict(x) for x in db.execute('SELECT path,length(content) AS size,revision FROM files WHERE project_id=? ORDER BY path',(pid,))]
@@ -545,8 +632,8 @@ class Handler(BaseHTTPRequestHandler):
                     app.touch(db,pid); return {'ok':True}
                 if method=='DELETE':
                     app.access(db,pid,user,owner=True)
-                    for table in ('members','files','history','invites','builds','project_backups','project_locations'): db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
-                    db.execute('DELETE FROM projects WHERE id=?',(pid,)); return {'ok':True}
+                    for table in ('members','files','history','invites','builds','project_backups','shared_project_backups','project_locations'): db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
+                    db.execute('DELETE FROM projects WHERE id=?',(pid,));app.typst.discard(pid=pid); return {'ok':True}
             if action=='file':
                 name=safe_path(query.get('path',[data.get('path','')])[0]); row=db.execute('SELECT * FROM files WHERE project_id=? AND path=?',(pid,name)).fetchone()
                 if method=='GET':
@@ -605,6 +692,7 @@ class Handler(BaseHTTPRequestHandler):
                 if method=='DELETE':
                     if data.get('userId')==p['owner']: raise Problem('The owner cannot be removed.')
                     db.execute('DELETE FROM members WHERE project_id=? AND user_id=?',(pid,data.get('userId')))
+                    app.typst.discard(pid=pid,user_id=data.get('userId'))
                     db.execute('DELETE FROM project_locations WHERE project_id=? AND user_id=?',(pid,data.get('userId'))); return {'ok':True}
             if action=='invite' and method=='POST':
                 app.access(db,pid,user,owner=True); role=data.get('role','editor')

@@ -112,7 +112,12 @@ class TypstTests(unittest.TestCase):
         for call in snapshot.call_args_list:
             self.assertEqual(call.args[1]['repository'],'example/all-documents')
             self.assertTrue(call.args[4])
-        self.assertEqual(self.owner.call(self.base+'/backup-settings')[1],before)
+        after=self.owner.call(self.base+'/backup-settings')[1]
+        self.assertEqual({key:value for key,value in after.items() if key!='global_backup'},
+                         {key:value for key,value in before.items() if key!='global_backup'})
+        self.assertIsNone(before['global_backup']['snapshot'])
+        self.assertEqual(after['global_backup']['snapshot']['last_commit'],'a'*40)
+        self.assertFalse(after['global_backup']['stale'])
         self.assertEqual(self.owner.call('/api/backups','POST',{'token':'test-token-in-memory','sharedOnly':'yes'})[0],400)
         with self.app.db() as db:self.assertNotIn('test-token-in-memory','\n'.join(db.iterdump()))
 
