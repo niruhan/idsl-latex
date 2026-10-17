@@ -2,3 +2,4 @@
 
 #projectsNavButton{background:transparent;color:#edf3eb;border-color:#789889;white-space:nowrap} .topbar .brand{white-space:nowrap}
 @media(max-width:700px){.topbar .brand{display:flex;font-size:0;gap:0}.topbar .brand .mark{display:none}.topbar .brand::after{content:"IDSL";font-size:14px}.project-label{display:none}#projectsNavButton{font-size:11px;padding:7px}}
+.diagnostic{display:block;width:100%;text-align:left;font:11px/1.6 var(--mono);color:#f4ce9a;padding:6px 10px;border-bottom:1px solid #ffffff15}.diagnostic:hover{background:#ffffff12}.visual-block li{padding:4px}.backup-destination{font:12px var(--mono);overflow-wrap:anywhere}.backup-options{display:grid;gap:12px;margin:20px 0}.backup-options label{margin:0}.backup-result{padding:12px;border:1px solid var(--line);border-radius:6px;margin-top:16px;line-height:1.7}.backup-result.error{border-color:#c38573}.backup-check{display:flex;align-items:center;gap:8px}.backup-check input{width:auto}

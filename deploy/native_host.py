@@ -61,7 +61,7 @@ def main():
     (STATE / 'url').write_text(origin + '\n')
     env = dict(os.environ, APP_ORIGIN=origin, HOST='127.0.0.1', PORT=str(port),
                DATA_DIR=str(ROOT / 'data'), LATEX_ENGINE='tectonic',
-               TECTONIC_BIN=str(ROOT / 'deploy/sandbox.py'), COMPILE_TIMEOUT='300',
+               TECTONIC_BIN=str(ROOT / 'deploy/sandbox.py'), TYPST_BIN=str(ROOT / 'deploy/sandbox.py'), COMPILE_TIMEOUT='300',
                SETUP_TOKEN=token_file.read_text().strip(), PYTHONDONTWRITEBYTECODE='1',
                PYTHONUNBUFFERED='1')
     env.pop('COMPILER_URL',None)

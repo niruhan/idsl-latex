@@ -1,0 +1,42 @@
+"""Run browser regressions with an ephemeral database and the local Mac compilers.
+
+Set PLAYWRIGHT_MODULE and NODE_BIN to your external Playwright installation.
+"""
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from deploy.local import environment, ROOT
+
+
+def main():
+    with tempfile.TemporaryDirectory(prefix='labtex-browser-') as folder:
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            port = probe.getsockname()[1]
+        origin = f'http://127.0.0.1:{port}'
+        env = dict(environment(), DATA_DIR=folder, SETUP_TOKEN='local-browser-test-only',
+                   APP_ORIGIN=origin, TEST_ORIGIN=origin)
+        log_path = Path(folder) / 'server.log'
+        with log_path.open('w') as log:
+            server = subprocess.Popen([sys.executable, str(ROOT / 'server.py'), '--port', str(port)], cwd=ROOT, env=env, stdout=log, stderr=log)
+        try:
+            for _ in range(100):
+                try:
+                    with urllib.request.urlopen(origin + '/api/session', timeout=1): break
+                except OSError: time.sleep(.1)
+            else: raise RuntimeError('Browser test server did not start: ' + log_path.read_text())
+            for script in ('browser_smoke.cjs', 'browser_typst.cjs'):
+                subprocess.run([os.getenv('NODE_BIN', 'node'), str(ROOT / 'tests' / script)], env=env, cwd=ROOT, check=True)
+        finally:
+            server.terminate()
+            server.wait(timeout=10)
+
+
+if __name__ == '__main__': main()

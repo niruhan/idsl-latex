@@ -1,6 +1,6 @@
-# IDSL Lab LaTeX
+# IDSL Lab — LaTeX + Typst
 
-A small, self-hosted LaTeX workspace for research groups. Edit source or simple text visually, browse project files, compile in an isolated environment, and preview or download the PDF beside your document.
+A self-hosted LaTeX and Typst workspace. Edit source or simple text visually, browse project files, and preview or download the PDF beside your document. Run locally on your Mac, or use the isolated Linux deployment for shared hosting.
 
 [Download the latest release](https://github.com/niruhan/idsl-latex/releases/latest) · [Set up your server](#download-and-run) · [See more screenshots](#screenshots)
 
@@ -10,7 +10,23 @@ A small, self-hosted LaTeX workspace for research groups. Edit source or simple 
 
 Each member has their own account and private projects. Owners can share individual projects with editors or viewers. Registration requires an administrator-created invitation and an approved email address; no mail service is needed.
 
-**Supported host:** x86_64 Linux with Python 3.10+, systemd user services, cgroup v2, and unprivileged Bubblewrap namespaces. Tested on Ubuntu 22.04. Use a dedicated Linux VM for a public installation. Native Windows/macOS hosting and Docker deployment are not included in this release.
+**Shared/public host:** x86_64 Linux with Python 3.10+, systemd user services, cgroup v2, and unprivileged Bubblewrap namespaces. Tested on Ubuntu 22.04. Use a dedicated Linux VM for a public installation. Personal macOS hosting is also supported through the local runner below. Windows and Docker deployment are not included.
+
+## Run on your Mac
+
+Requires **Python 3.10+**, on Apple Silicon or Intel:
+
+```sh
+./labtex setup
+./labtex start
+./labtex setup-token
+```
+
+Open **http://127.0.0.1:8765**, use the token to create your account, then choose **My projects → New project → Typst or LaTeX**. Setup downloads verified compilers into this checkout and checks both with real PDF builds. The first LaTeX build downloads packages as needed. Stop with `./labtex stop`; restart with `./labtex start`.
+
+Typst includes a starter with equations/bibliography, visual block editing, formatting tools, auto-compile, clickable error locations, and PDF export. **Backup** supports one GitHub repository for all your projects or a separate repository for a particular project, with optional automatic backups while the tab is open.
+
+See [the local guide](docs/LOCAL.md) for commands, GitHub setup, restoration, and local-mode boundaries. The Linux instructions below remain for shared hosting.
 
 ## Screenshots
 
@@ -47,7 +63,7 @@ cd idsl-latex
 
 You can also download the source ZIP from [Releases](https://github.com/niruhan/idsl-latex/releases), extract it, and run `python3 labtex setup` followed by `python3 labtex start` inside the extracted folder. Use `python3 labtex` instead of `./labtex` if your ZIP extractor does not preserve executable permissions.
 
-Setup downloads pinned versions of Tectonic and its TeX package bundle, checks SHA-256 digests, prepares the offline compiler, and checks both isolation and actual PDF compilation. There is no Python virtual environment, npm build, database server, or Conda environment to configure. It does not change firewall rules or bind a public port.
+Setup downloads pinned versions of Typst, Tectonic, and the TeX package bundle, checks SHA-256 digests, prepares the offline compiler, and checks both isolation and actual PDF compilation. There is no Python virtual environment, npm build, database server, or Conda environment to configure. It does not change firewall rules or bind a public port.
 
 ### 3. Create your administrator account
 
@@ -147,8 +163,9 @@ python3 manage.py reset-password member@example.org
 
 ## Features and limits
 
-- Source editor, project file tree, binary uploads, ZIP import/export, and a PDF preview pane.
-- Visual editing for basic LaTeX headings and paragraphs. Use source mode for equations, tables, macros, and complex formatting; this is not a full Overleaf/WYSIWYG replacement.
+- LaTeX and Typst projects, source editor, project file tree, binary uploads, ZIP import/export, and a PDF preview pane.
+- GitHub source backups: one repository with project folders or a separate repository per document; owned-project batch backups and optional backups after saving while the tab stays open.
+- Visual editing for basic LaTeX/Typst headings and paragraphs, plus simple Typst lists. Use source mode for equations, tables, macros, and complex formatting; this is not a full Overleaf/WYSIWYG replacement.
 - Autosave, revision history, and conflict detection. Concurrent edits can conflict; there is no live collaborative cursor or character-level merge.
 - Independent projects, account invitations, project invitations, and owner/editor/viewer permissions.
 - Offline Tectonic compilation with bibliography support. The package bundle is pinned; shell-escape packages and tools requiring external commands are unsupported.

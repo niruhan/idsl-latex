@@ -1,6 +1,6 @@
 # Development and release validation
 
-The runtime is Python's standard library plus plain browser JavaScript. There is no production npm/pip dependency tree. Compiler and tunnel downloads are pinned in `deploy/dependencies.json`.
+The runtime is Python's standard library plus plain browser JavaScript. There is no production npm/pip dependency tree. Linux compiler and tunnel downloads are pinned in `deploy/dependencies.json`; Mac compilers are pinned in `deploy/local-dependencies.json`. See [local development](LOCAL.md) for the Mac runner and isolated browser suite.
 
 ## Automated tests
 
@@ -14,7 +14,7 @@ Tests use temporary databases and fictional addresses under `example.test`. They
 
 The installer also checks namespaces and compiles a real sample through the offline compiler. `./labtex doctor` repeats these checks. Never bypass failed isolation checks for a shared deployment.
 
-CI runs the backend/installer tests with a distribution TeX Live installation. Native sandbox tests skip there because the production bundle is not configured. Full native installation, nested compilation, and browser tests must also pass on a disposable Linux installation before a release.
+CI runs the backend/installer tests with a distribution TeX Live installation. Native sandbox tests skip there because the production bundle is not configured. Full native installation, nested compilation, and browser tests must also pass on a disposable Linux installation before a release. Mac validation does not establish that Linux sandbox installation is working.
 
 ## Browser regression test
 

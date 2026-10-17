@@ -32,7 +32,7 @@ def web_command():
              '--ro-bind',str(bundle),str(bundle),
              '--ro-bind',str(tex),str(tex),
              '--bind',str(data),str(data),'--chdir',str(ROOT)]
-    for key in ('APP_ORIGIN','HOST','PORT','LATEX_ENGINE','TECTONIC_BIN','COMPILE_TIMEOUT',
+    for key in ('APP_ORIGIN','HOST','PORT','LATEX_ENGINE','TECTONIC_BIN','TYPST_BIN','COMPILE_TIMEOUT',
                 'TRUST_CLOUDFLARE','LABTEX_TMPDIR'):
         if key in os.environ:command+=['--setenv',key,os.environ[key]]
     command+=['--setenv','DATA_DIR',str(data),'--setenv','PATH','/usr/bin:/bin',

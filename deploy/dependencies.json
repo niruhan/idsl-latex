@@ -13,5 +13,10 @@
     "version": "default_bundle_v33",
     "url": "https://data1b.fullyjustified.net/tlextras-2022.0r0.tar",
     "sha256": "425685e124746c15ba9bb8e0596bdaad98fce886afa347fbcf9ec0e9acd7fe79"
+  },
+  "typst": {
+    "version": "0.15.1",
+    "url": "https://github.com/typst/typst/releases/download/v0.15.1/typst-x86_64-unknown-linux-musl.tar.xz",
+    "sha256": "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c"
   }
 }

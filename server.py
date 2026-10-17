@@ -6,7 +6,8 @@ from contextlib import contextmanager
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from core import Problem, MAX_FILE, MAX_PROJECT, MAX_FILES, SAMPLE, safe_path, pack_zip, unpack_zip, compile_project
+from core import Problem, MAX_FILE, MAX_PROJECT, MAX_FILES, SAMPLE, safe_path, pack_zip, unpack_zip, compile_project, starter_files, main_document
+from github_backup import destination, GitHub, backup_snapshot
 ROOT=Path(__file__).resolve().parent
 MAX_OWNED_PROJECTS=25
 MAX_HISTORY=40*1024*1024
@@ -66,6 +67,8 @@ CREATE TABLE IF NOT EXISTS builds(project_id TEXT PRIMARY KEY,revision INTEGER,s
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS lab_invites(id TEXT PRIMARY KEY,token TEXT UNIQUE,created REAL,expires REAL,used_by TEXT);
 CREATE TABLE IF NOT EXISTS approved_emails(email TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS backup_settings(user_id TEXT PRIMARY KEY,repository TEXT,branch TEXT);
+CREATE TABLE IF NOT EXISTS project_backups(project_id TEXT PRIMARY KEY,mode TEXT,repository TEXT,branch TEXT,last_commit TEXT,last_url TEXT,last_revision INTEGER);
 ''')
             # Upgrade existing installations: the original account manages lab signup.
             db.execute("INSERT OR IGNORE INTO settings SELECT 'lab_admin_id',id FROM users WHERE id!='demo' ORDER BY rowid LIMIT 1")
@@ -94,7 +97,7 @@ CREATE TABLE IF NOT EXISTS approved_emails(email TEXT PRIMARY KEY);
         if db.execute('SELECT COUNT(*) FROM projects WHERE owner=?',(owner,)).fetchone()[0]>=MAX_OWNED_PROJECTS:
             raise Problem('You can own up to 25 projects. Export and delete an unused project first.',413)
         pid=secrets.token_hex(12)
-        main='main.tex' if 'main.tex' in files else next((p for p in files if p.endswith('.tex') and b'\\documentclass' in files[p]),next((p for p in files if p.endswith('.tex')),'main.tex'))
+        main=main_document(files)
         db.execute('INSERT INTO projects VALUES(?,?,?,?,1,?)',(pid,title(name),owner,main,time.time()))
         db.execute('INSERT INTO members VALUES(?,?,?)',(pid,owner,'owner'))
         db.executemany('INSERT INTO files VALUES(?,?,?,1)',[(pid,p,c) for p,c in files.items()]); return pid
@@ -152,6 +155,30 @@ CREATE TABLE IF NOT EXISTS approved_emails(email TEXT PRIMARY KEY);
             return {**result,'pdf':bool(pdf),'revision':project['revision']}
         finally:
             with self.lock: self.jobs.discard(pid)
+
+    def backup(self,pid,user,token):
+        key='backup:'+pid
+        with self.lock:
+            if key in self.jobs: raise Problem('This project is already being backed up.',429)
+            self.jobs.add(key)
+        try:
+            with self.db() as db:
+                db.execute('BEGIN')
+                project=self.access(db,pid,user,owner=True)
+                settings=db.execute('SELECT * FROM project_backups WHERE project_id=?',(pid,)).fetchone()
+                shared=not settings or settings['mode']=='shared'
+                target=db.execute('SELECT * FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone() if shared else settings
+                if not target: raise Problem('Set your GitHub backup destination first.')
+                target=dict(target)
+                files={r['path']:r['content'] for r in db.execute('SELECT path,content FROM files WHERE project_id=?',(pid,))}
+            result=backup_snapshot(GitHub(token),target,project,files,shared)
+            with self.db() as db:
+                self.access(db,pid,user,owner=True)
+                db.execute('INSERT INTO project_backups VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET last_commit=excluded.last_commit,last_url=excluded.last_url,last_revision=excluded.last_revision',
+                           (pid,'shared' if shared else 'separate','' if shared else target['repository'],'' if shared else target['branch'],result['commit'],result['url'],project['revision']))
+            return {**result,'revision':project['revision'],'name':project['name']}
+        finally:
+            with self.lock: self.jobs.discard(key)
 
 class Handler(BaseHTTPRequestHandler):
     server_version='LabTeX'
@@ -240,6 +267,20 @@ class Handler(BaseHTTPRequestHandler):
             import traceback; traceback.print_exc(); self.send({'error':'The server could not complete this request.'},500)
     def route(self,method,path,query,data):
         app=self.app
+        if path=='/api/backups' and method=='POST':
+            with app.db() as db:
+                user=self.user(db)
+                projects=[dict(r) for r in db.execute('SELECT id,name FROM projects WHERE owner=? ORDER BY id',(user['id'],))]
+            results=[]
+            for project in projects:
+                pid=project['id']
+                try: results.append({'id':pid,**app.backup(pid,user,data.get('token'))})
+                except Problem as error: results.append({'id':pid,'name':project['name'],'error':str(error)})
+            return {'results':results}
+        backup_match=re.fullmatch(r'/api/projects/([a-f0-9]{24})/backup',path)
+        if backup_match and method=='POST':
+            with app.db() as db: user=self.user(db)
+            return app.backup(backup_match[1],user,data.get('token'))
         if method=='GET' and not path.startswith('/api/'):
             allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}
             if path not in allowed: raise Problem('Not found.',404)
@@ -274,6 +315,13 @@ class Handler(BaseHTTPRequestHandler):
                     app.new_project(db,user['id'],'My first paper' if path=='/api/register-lab' else 'A space for your next idea',SAMPLE)
                 result,headers=self.login(db,user); db.commit(); self.send(result,headers=headers); return
             user=self.user(db)
+            if path=='/api/backup-settings':
+                if method=='PUT':
+                    value=destination(data)
+                    db.execute('INSERT OR REPLACE INTO backup_settings VALUES(?,?,?)',(user['id'],value['repository'],value['branch']))
+                elif method!='GET': raise Problem('Not found.',404)
+                row=db.execute('SELECT repository,branch FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone()
+                return dict(row) if row else {'repository':'','branch':''}
             if path=='/api/approved-emails':
                 if not app.is_lab_admin(db,user): raise Problem('Only the lab administrator can manage approved emails.',403)
                 if method=='PUT':
@@ -305,13 +353,28 @@ class Handler(BaseHTTPRequestHandler):
                 if method=='GET': return {'projects':[dict(x) for x in db.execute('SELECT p.id,p.name,p.main,p.updated,m.role FROM projects p JOIN members m ON p.id=m.project_id WHERE m.user_id=? ORDER BY p.updated DESC',(user['id'],))]}
                 if method=='POST':
                     db.execute('BEGIN IMMEDIATE')
-                    files=unpack_zip(base64.b64decode(data['zip'],validate=True)) if data.get('zip') else (SAMPLE.copy() if data.get('template',True) else {'main.tex':b'\\documentclass{article}\n\\begin{document}\nYour next idea starts here.\n\\end{document}\n'})
+                    files=unpack_zip(base64.b64decode(data['zip'],validate=True)) if data.get('zip') else starter_files(data.get('format','latex'),data.get('template',True))
                     return {'id':app.new_project(db,user['id'],data.get('name','Untitled paper'),files)}
             match=re.fullmatch(r'/api/projects/([a-f0-9]{24})(?:/(.*))?',path)
             if not match: raise Problem('Not found.',404)
             pid,action=match.groups()
             if method!='GET' and action!='compile': db.execute('BEGIN IMMEDIATE')
             p=app.access(db,pid,user,write=method!='GET')
+            if action=='backup-settings':
+                app.access(db,pid,user,owner=True)
+                if method=='PUT':
+                    value=destination(data)
+                    mode=data.get('mode','shared')
+                    if mode not in ('shared','separate'): raise Problem('Choose shared or separate repository mode.')
+                    repository=value['repository'] if mode=='separate' else ''
+                    branch=value['branch'] if mode=='separate' else ''
+                    previous=db.execute('SELECT * FROM project_backups WHERE project_id=?',(pid,)).fetchone()
+                    keep=previous and (previous['mode'],previous['repository'],previous['branch'])==(mode,repository,branch)
+                    db.execute('INSERT OR REPLACE INTO project_backups VALUES(?,?,?,?,?,?,?)',
+                               (pid,mode,repository,branch,previous['last_commit'] if keep else None,previous['last_url'] if keep else None,previous['last_revision'] if keep else None))
+                elif method!='GET': raise Problem('Not found.',404)
+                row=db.execute('SELECT * FROM project_backups WHERE project_id=?',(pid,)).fetchone()
+                return dict(row) if row else {'mode':'shared','repository':'','branch':'','last_commit':None,'last_url':None,'last_revision':None}
             if action is None:
                 if method=='GET':
                     p['files']=[dict(x) for x in db.execute('SELECT path,length(content) AS size,revision FROM files WHERE project_id=? ORDER BY path',(pid,))]
@@ -319,13 +382,13 @@ class Handler(BaseHTTPRequestHandler):
                 if method=='PUT':
                     if 'main' in data:
                         main=safe_path(data['main'])
-                        if not main.endswith('.tex') or not db.execute('SELECT 1 FROM files WHERE project_id=? AND path=?',(pid,main)).fetchone(): raise Problem('Choose an existing .tex file.')
+                        if not main.endswith(('.tex','.typ')) or not db.execute('SELECT 1 FROM files WHERE project_id=? AND path=?',(pid,main)).fetchone(): raise Problem('Choose an existing .tex or .typ file.')
                         db.execute('UPDATE projects SET main=? WHERE id=?',(main,pid))
                     if 'name' in data: db.execute('UPDATE projects SET name=? WHERE id=?',(title(data['name']),pid))
                     app.touch(db,pid); return {'ok':True}
                 if method=='DELETE':
                     app.access(db,pid,user,owner=True)
-                    for table in ('members','files','history','invites','builds'): db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
+                    for table in ('members','files','history','invites','builds','project_backups'): db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
                     db.execute('DELETE FROM projects WHERE id=?',(pid,)); return {'ok':True}
             if action=='file':
                 name=safe_path(query.get('path',[data.get('path','')])[0]); row=db.execute('SELECT * FROM files WHERE project_id=? AND path=?',(pid,name)).fetchone()

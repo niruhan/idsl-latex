@@ -154,6 +154,16 @@ def setup(args):
         with tar.extractfile(members[0]) as src, (STATE / 'tex/bin/tectonic').open('wb') as dst:
             shutil.copyfileobj(src, dst)
     (STATE / 'tex/bin/tectonic').chmod(0o700)
+    typst_archive = STATE / 'downloads/typst.tar.xz'
+    download(PINS['typst'], typst_archive)
+    with tarfile.open(typst_archive) as tar:
+        members = [m for m in tar if m.isfile() and PurePosixPath(m.name).name == 'typst']
+        if len(members) != 1:
+            raise RuntimeError('Typst archive did not contain exactly one executable.')
+        with tar.extractfile(members[0]) as src, (STATE / 'tex/bin/typst').open('wb') as dst:
+            shutil.copyfileobj(src, dst)
+    (STATE / 'tex/bin/typst').chmod(0o700)
+
     if not valid_bundle:
         source = STATE / 'downloads/bundle.tar'
         download(PINS['bundle'], source)
@@ -175,13 +185,14 @@ def setup(args):
 def doctor():
     preflight()
     value = config()
-    if not Path(value['tex_bundle']).is_file() or not (Path(value['tex_environment']) / 'bin/tectonic').is_file():
+    if not Path(value['tex_bundle']).is_file() or not all((Path(value['tex_environment']) / ('bin/' + name)).is_file() for name in ('tectonic','typst')):
         raise RuntimeError('Compiler or offline bundle missing. Run ./labtex setup.')
     environment = dict(os.environ, TEST_LATEX_ENGINE='tectonic', LATEX_ENGINE='tectonic',
-                       TECTONIC_BIN=str(ROOT / 'deploy/sandbox.py'), LABTEX_TMPDIR='/dev/shm',
+                       TECTONIC_BIN=str(ROOT / 'deploy/sandbox.py'), TYPST_BIN=str(ROOT / 'deploy/sandbox.py'), LABTEX_TMPDIR='/dev/shm',
                        PYTHONDONTWRITEBYTECODE='1')
     environment.pop('COMPILER_URL', None)
     run('/usr/bin/python3', '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*sandbox.py', cwd=ROOT, env=environment)
+    run('/usr/bin/python3', '-c', "from core import TYPST_SAMPLE,compile_project; r=compile_project(TYPST_SAMPLE,'main.typ'); assert r['success'],r['log']; print('Offline sandboxed Typst compilation passed.')", cwd=ROOT, env=environment)
     run('/usr/bin/python3', '-c', "from core import SAMPLE,compile_project; r=compile_project(SAMPLE,'main.tex'); assert r['success'],r['log']; print('Offline sandboxed PDF compilation passed.')", cwd=ROOT, env=environment)
 
 
@@ -332,7 +343,7 @@ def main():
         elif args.command == 'test':
             config()
             env = dict(os.environ, TEST_LATEX_ENGINE='tectonic', TECTONIC_BIN=str(ROOT / 'deploy/sandbox.py'),
-                       LABTEX_TMPDIR='/dev/shm', PYTHONDONTWRITEBYTECODE='1')
+                       TYPST_BIN=str(ROOT / 'deploy/sandbox.py'), LABTEX_TMPDIR='/dev/shm', PYTHONDONTWRITEBYTECODE='1')
             env.pop('COMPILER_URL', None)
             run('/usr/bin/python3', '-m', 'unittest', 'discover', '-s', 'tests', '-v', cwd=ROOT, env=env)
     except (RuntimeError, OSError, subprocess.CalledProcessError) as error:

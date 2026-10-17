@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Run each Tectonic build in a fresh, minimal bubblewrap filesystem."""
+"""Run each Tectonic or Typst build in a fresh bubblewrap filesystem."""
 import json
 import os
 from pathlib import Path
@@ -36,6 +36,8 @@ def sandbox_command(arguments, work):
         '--setenv', 'LANG', 'C.UTF-8',
         '--setenv', 'TECTONIC_UNTRUSTED_MODE', '1',
     ]
+    if arguments[:1] == ['compile']:
+        return command + ['--', '/opt/tex/bin/typst', *arguments]
     return command + ['--', '/opt/tex/bin/tectonic', '--bundle', '/opt/texbundle/bundle.zip', *arguments]
 
 

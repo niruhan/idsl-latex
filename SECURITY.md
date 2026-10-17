@@ -32,3 +32,9 @@ Never commit or upload `data/`, `.local/`, backups, `.env` files, logs, browser 
 Installers check pinned SHA-256 hashes for public dependencies before using them. This detects corrupt or changed downloads, but is not an independent guarantee of upstream integrity. Review upstream security releases and update `deploy/dependencies.json` deliberately. The package bundle is pinned for reproducibility and may not contain recent packages. Tectonic is MIT-licensed; cloudflared is Apache-2.0; the TeX bundle includes packages under multiple licenses.
 
 Only the latest published release is maintained. Back up before upgrading. If a real credential is accidentally published, revoke/rotate it immediately; deleting the current file alone does not remove it from Git history, clones, or caches.
+
+## Personal macOS mode and GitHub backups
+
+The Mac local runner binds to loopback and runs compilers as the current user, using a dedicated compiler home, Tectonic untrusted mode, Typst project-root limits, and bounded builds. It does not provide Bubblewrap/cgroup isolation. Use it for trusted personal projects; keep shared/public hosting on Linux. See [local mode](docs/LOCAL.md).
+
+Only project owners may configure or trigger GitHub backups. Tokens are supplied per browser session in request bodies, used only for requests to the fixed GitHub API hostname, and never persisted. Backup configuration and commit identifiers are stored separately from source. Snapshots exclude the application database and local build output. GitHub permissions and repository visibility control access to backed-up source. Branches are updated without force; local data remains on errors.

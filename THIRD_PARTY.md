@@ -11,3 +11,10 @@ Dependencies are downloaded during setup; their binaries and package archives ar
 | Python, SQLite, systemd, fonts | Runtime and host services | Supplied by your Linux distribution under their respective licenses |
 
 Exact download URLs and SHA-256 digests are in [deploy/dependencies.json](deploy/dependencies.json). The compiler and connector hashes match their upstream GitHub release metadata. The bundle hash records the downloaded public archive. No installation-specific settings or credentials belong in this manifest.
+
+## macOS local compiler downloads
+
+- [Typst](https://github.com/typst/typst), Apache-2.0. Official binaries include their font/license notices in the release archive, retained under `.local/downloads`.
+- [Tectonic](https://github.com/tectonic-typesetting/tectonic), MIT. Its downloaded TeX packages/fonts retain their respective licenses.
+
+macOS archive versions, URLs, and SHA-256 digests are pinned for Apple Silicon and Intel in `deploy/local-dependencies.json`.

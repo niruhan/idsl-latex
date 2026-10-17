@@ -1,5 +1,5 @@
-"""Validation, project archives, and bounded native LaTeX compilation."""
-import base64, io, os, re, signal, subprocess, tempfile, threading, time, zipfile
+"""Validation, project archives, and bounded LaTeX/Typst compilation."""
+import base64, io, json, os, re, signal, subprocess, tempfile, threading, time, zipfile
 from pathlib import Path, PurePosixPath
 
 MAX_FILE = 8 * 1024 * 1024
@@ -37,6 +37,17 @@ def unpack_zip(raw):
                 name = safe_path(x.filename[len(prefix):] if strip else x.filename)
                 if name in files: raise Problem('ZIP contains duplicate paths.')
                 files[name] = z.read(x)
+            # A downloaded GitHub snapshot can be imported as a fresh project.
+            # Recognize only our complete root manifest; retain other JSON files.
+            marker = files.get('labtex-project.json')
+            if marker:
+                try:
+                    metadata = json.loads(marker)
+                    if (metadata.get('version') == 1 and re.fullmatch(r'[a-f0-9]{24}', metadata.get('project_id', ''))
+                            and set(metadata['files']) == set(files) - {'labtex-project.json'}):
+                        del files['labtex-project.json']
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    pass
             return files
     except (zipfile.BadZipFile, RuntimeError, NotImplementedError):
         raise Problem('Use a valid, unencrypted ZIP archive.')
@@ -55,7 +66,7 @@ def decode_files(items):
 
 def compile_project(files, main):
     safe_path(main)
-    if main not in files or not main.endswith('.tex'): raise Problem('Choose an existing .tex file as the main document.')
+    if main not in files or not main.endswith(('.tex', '.typ')): raise Problem('Choose an existing .tex or .typ file as the main document.')
     if not BUILD_LOCK.acquire(False): raise Problem('Compiler is busy. Try again shortly.', 429)
     start = time.monotonic()
     try:
@@ -67,19 +78,26 @@ def compile_project(files, main):
                 dest.write_bytes(data)
             out = root / '_labtex_output'
             out.mkdir()
-            engine = os.getenv('LATEX_ENGINE', 'tectonic')
-            if engine == 'tectonic':
+            engine = 'typst' if main.endswith('.typ') else os.getenv('LATEX_ENGINE', 'tectonic')
+            if engine == 'typst':
+                command = [os.getenv('TYPST_BIN', 'typst'), 'compile', '--root', str(root),
+                           '--diagnostic-format', 'short', main, str(out / (PurePosixPath(main).stem+'.pdf'))]
+            elif engine == 'tectonic':
                 command = [os.getenv('TECTONIC_BIN','tectonic'), '--untrusted', '--keep-logs', '--synctex', '--outdir', str(out), main]
             elif engine == 'pdflatex':
                 # -norc rejects project .latexmkrc, and no-shell-escape rejects external commands.
                 command = ['latexmk', '-norc', '-pdf', '-interaction=nonstopmode', '-halt-on-error', '-no-shell-escape', '-outdir='+str(out), main]
             else: raise Problem('Unknown LATEX_ENGINE.', 503)
-            env = {k:v for k,v in os.environ.items() if k in ('PATH','HOME','XDG_CACHE_HOME','LANG','SSL_CERT_FILE','SSL_CERT_DIR','FONTCONFIG_PATH','TEXFORMATS')}
+            env = {k:v for k,v in os.environ.items() if k in ('PATH','HOME','XDG_CACHE_HOME','LANG','SSL_CERT_FILE','SSL_CERT_DIR','FONTCONFIG_PATH','TEXFORMATS','TYPST_PACKAGE_PATH','TYPST_PACKAGE_CACHE_PATH')}
+            # Local builds use a dedicated compiler home, never the account's configuration.
+            if os.getenv('LABTEX_COMPILER_HOME'):
+                env['HOME'] = os.environ['LABTEX_COMPILER_HOME']
+                env['XDG_CACHE_HOME'] = str(Path(env['HOME']) / '.cache')
             env.update(TECTONIC_UNTRUSTED_MODE='1', openin_any='p', openout_any='p', TEXMFOUTPUT=str(out))
             timeout = min(600,max(10,int(os.getenv('COMPILE_TIMEOUT','120'))))
             with tempfile.TemporaryFile() as log:
                 try: proc = subprocess.Popen(command,cwd=root,env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-                except OSError: raise Problem('Compiler unavailable. Ask the server operator to run ./labtex doctor.',503)
+                except OSError: raise Problem(f'{engine} compiler unavailable. Run ./labtex local setup on macOS, or ask the server operator to configure this compiler.',503)
                 stopped = False
                 while proc.poll() is None:
                     if time.monotonic()-start > timeout or log.tell() > 4*1024*1024:
@@ -153,3 +171,60 @@ Diffusion models provide a useful starting point for studying generative process
   year={2020}
 }
 '''}
+
+TYPST_SAMPLE = {
+    'main.typ': b'''#set page(paper: "a4", margin: 2.5cm)
+#set text(font: "Libertinus Serif", size: 11pt)
+#set heading(numbering: "1.")
+
+#align(center)[
+  #text(size: 24pt, weight: "bold")[A space for your next idea]
+
+  IDSL Lab
+]
+
+#include "sections/introduction.typ"
+
+= A mathematical starting point
+
+The forward process gradually adds noise to an observation:
+
+$ x_t = sqrt(bar(alpha)_t) x_0 + sqrt(1 - bar(alpha)_t) epsilon,
+  quad epsilon ~ cal(N)(0, I). $
+
+= Next steps
+
+- Edit headings and paragraphs in *Visual* mode.
+- Turn on auto-compile to keep the PDF up to date.
+- Add figures, references, and your own chapters.
+
+#bibliography("references.bib")
+''',
+    'sections/introduction.typ': b'''= Introduction
+
+Write, explore, and refine your ideas here. Your source and compiled document stay side by side.
+
+Typst combines readable markup with precise typesetting. Use *bold text*, _emphasis_, and equations in source mode, or edit simple text directly in Visual mode.
+
+Diffusion models provide a useful starting point for studying generative processes @ho2020denoising.
+''',
+    'references.bib': SAMPLE['references.bib'],
+}
+
+
+def starter_files(format='latex', template=True):
+    if format not in ('latex', 'typst'):
+        raise Problem('Choose LaTeX or Typst.')
+    if template:
+        return (TYPST_SAMPLE if format == 'typst' else SAMPLE).copy()
+    if format == 'typst':
+        return {'main.typ': b'= Your next idea\n\nStart writing here.\n'}
+    return {'main.tex': b'\\documentclass{article}\n\\begin{document}\nYour next idea starts here.\n\\end{document}\n'}
+
+
+def main_document(files):
+    for name in ('main.tex', 'main.typ'):
+        if name in files:
+            return name
+    return next((p for p in files if p.endswith('.tex') and b'\\documentclass' in files[p]),
+                next((p for p in files if p.endswith(('.tex', '.typ'))), next(iter(files))))
