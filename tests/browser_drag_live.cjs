@@ -29,7 +29,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   console.log('PASS single-row desktop controls, folder drag with descendants, Up/All projects and navigation placement');
 
   await page.evaluate(id=>localStorage.setItem('labtex-auto:'+id,'false'),pid);
-  await page.locator('.project-entry[data-project="'+pid+'"]').click();await page.locator('#workspace').waitFor({state:'visible'});
+  await page.locator('.project-entry[data-project="'+pid+'"]').click();await page.locator('#workspace').waitFor({state:'visible'});await page.waitForFunction(()=>!document.querySelector('#workspace').inert);
   await page.locator('.tree-file[title="main.typ"]').dragTo(page.locator('.tree-folder[data-folder="notes"]'));
   await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='notes/main.typ');assert.equal((await api(base)).main,'notes/main.typ');
   await page.locator('.tree-folder[data-folder="notes"]').dragTo(page.locator('.tree-folder[data-folder="images"]'));
