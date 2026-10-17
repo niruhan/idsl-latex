@@ -44,7 +44,7 @@ The first home visit creates a private **Getting started with Typst** sample for
 
 ## Appearance
 
-Use the sun/moon control beside your avatar, or **Account → Appearance**, to choose **Light**, **Dark**, or **System**. System follows the device appearance and updates when it changes. The choice is remembered in this browser, synchronizes between its open tabs, and also applies to the sign-in screen. The editor theme changes interface colors; PDFs retain the colors defined by the document source.
+Click the sun/moon button beside your avatar to switch between light and dark with one click. The same button is available before sign-in. To follow your device instead, choose **System** under **Account → Appearance**; this is the default until you pick a theme. The choice is remembered in this browser and synchronizes between its open tabs. The editor theme changes interface colors; PDFs retain the colors defined by the document source.
 
 ![Dark Typst editor with document preview](images/dark-theme.png)
 

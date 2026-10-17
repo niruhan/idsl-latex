@@ -26,7 +26,7 @@ NODE_BIN=/path/to/node \
 python3 tests/run_browser.py
 ```
 
-This covers LaTeX/Typst editing and real builds, the project explorer and navigation, and appearance preferences (Light/Dark/System, reload persistence, device changes, tab synchronization, and mobile controls). It leaves `data/` untouched. Install Playwright separately and use Node 20+; set `CHROME_BIN` when using an existing Chromium browser.
+This covers LaTeX/Typst editing and real builds, the project explorer and navigation, and appearance preferences (one-click Light/Dark switching, System in account settings, reload persistence, device changes, tab synchronization, and mobile controls). It leaves `data/` untouched. Install Playwright separately and use Node 20+; set `CHROME_BIN` when using an existing Chromium browser.
 
 For the Linux deployment's browser checks:
 

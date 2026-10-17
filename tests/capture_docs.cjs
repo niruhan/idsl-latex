@@ -14,7 +14,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
  try{
   const fresh=await api('/api/session');assert.equal(fresh.needsSetup,true,'Never capture a working user installation');
   await page.goto(origin);await page.locator('#auth').waitFor({state:'visible'});
-  await page.locator('#authThemeButton').click();await page.locator('#themePreference').selectOption('light');await page.locator('#closeAppearance').click();
+  assert.equal(await page.evaluate(()=>document.documentElement.dataset.theme),'light');
   await page.locator('input[name=name]').fill('Demo Researcher');await page.locator('input[name=email]').fill('demo-owner@example.test');await page.locator('input[name=password]').fill('browser-test-password-only');await page.locator('input[name=token]').fill('local-browser-test-only');await page.locator('#authSubmit').click();
   await page.locator('#projectHome').waitFor({state:'visible'});await page.locator('.project-entry').first().waitFor();
   const initial=(await api('/api/projects')).projects;const latex=initial.find(p=>p.main.endsWith('.tex'));const sample=initial.find(p=>p.main.endsWith('.typ'));assert.ok(latex&&sample);
@@ -23,11 +23,15 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await api('/api/projects','POST',{name:'Literature review',format:'latex',template:false});
   await page.locator('#refreshProjects').click();await page.waitForFunction(()=>document.querySelectorAll('.project-entry').length===4);await capture('projects.png');
   await page.locator('#projectListView').click();await capture('projects-list.png');await page.locator('#projectGridView').click();
-  await page.setViewportSize({width:390,height:844});await capture('projects-mobile.png');await page.setViewportSize({width:1500,height:960});
+  // A fresh, tall viewport avoids full-page stitching artifacts after resizing.
+  const mobile=await context.newPage();mobile.on('pageerror',e=>errors.push(e.message));
+  await mobile.setViewportSize({width:390,height:1400});await mobile.goto(origin);
+  await mobile.locator('#projectHome').waitFor({state:'visible'});await mobile.waitForFunction(()=>document.querySelectorAll('.project-entry').length===4);
+  await mobile.locator('#toast').waitFor({state:'hidden'});await mobile.screenshot({path:path.join(output,'projects-mobile.png'),animations:'disabled'});console.log('Captured projects-mobile.png');await mobile.close();
   await page.locator('.project-entry[data-project="'+sample.id+'"]').click();await page.locator('#workspace').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));await capture('typst-workspace.png');
   await page.locator('button.tree-file[title="sections/introduction.typ"]').click();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='sections/introduction.typ');await page.locator('#visualTab').click();await capture('visual-editor.png');
-  await page.locator('#sourceTab').click();await page.locator('#themeButton').click();await page.locator('#themePreference').selectOption('dark');await page.locator('#closeAppearance').click();await capture('dark-theme.png');
-  await page.locator('#themeButton').click();await page.locator('#themePreference').selectOption('light');await page.locator('#closeAppearance').click();
+  await page.locator('#sourceTab').click();await page.locator('#themeButton').click();await capture('dark-theme.png');
+  await page.locator('#themeButton').click();
   await page.locator('#projectsNavButton').click();await page.locator('#projectHome').waitFor({state:'visible'});await page.locator('.project-entry[data-project="'+latex.id+'"]').click();await page.locator('#workspace').waitFor({state:'visible'});
   const build=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST');await page.locator('#compileButton').click();assert.equal((await(await build).json()).success,true);await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));await capture('workspace.png');
   // Give this sample a fictional coauthor without ever displaying a live link.

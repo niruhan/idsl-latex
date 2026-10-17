@@ -270,9 +270,11 @@ document.addEventListener('keydown',event=>{if(Home.visible&&!$('modal').open&&e
 function updateThemeControls(){
  const theme=window.labtexTheme;
  for(const id of ['themeButton','homeThemeButton','authThemeButton']){
-  $(id).title='Appearance · '+theme.preference+' ('+theme.resolved+')';
-  $(id).setAttribute('aria-label','Appearance · '+theme.resolved+' theme');
-  $(id).textContent=theme.resolved==='dark'?'☾':'☼';
+  const next=theme.resolved==='dark'?'light':'dark';
+  $(id).title='Switch to '+next+' theme';
+  $(id).setAttribute('aria-label',$(id).title);
+  $(id).setAttribute('aria-pressed',String(theme.resolved==='dark'));
+  $(id).textContent=next==='dark'?'☾':'☼';
  }
  if($('themeResolved'))$('themeResolved').textContent='Currently using the '+theme.resolved+' theme. Your PDF keeps its document colors.';
 }
@@ -282,5 +284,5 @@ function appearanceDialog(){
  $('themePreference').addEventListener('change',()=>window.labtexTheme.set($('themePreference').value));
  action('closeAppearance',closeModal);updateThemeControls();
 }
-for(const id of ['themeButton','homeThemeButton','authThemeButton'])action(id,appearanceDialog);
+for(const id of ['themeButton','homeThemeButton','authThemeButton'])action(id,()=>window.labtexTheme.set(window.labtexTheme.resolved==='dark'?'light':'dark'));
 window.addEventListener('labtex-themechange',updateThemeControls);updateThemeControls();

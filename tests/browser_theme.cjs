@@ -6,12 +6,13 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
  const context=await browser.newContext({viewport:{width:1440,height:960},colorScheme:'light'});
  const page=await context.newPage();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  async function resolved(value){await page.waitForFunction(value=>document.documentElement.dataset.theme===value,value);}
- async function choose(button,value){await page.locator(button).click();await page.locator('#themePreference').selectOption(value);await page.locator('#closeAppearance').click();}
+ async function choose(button,value){assert.equal(await page.locator(button).getAttribute('aria-label'),'Switch to '+value+' theme');await page.locator(button).click();await resolved(value);assert.equal(await page.locator('#modal').evaluate(el=>el.open),false,'Theme switching must not open a dialog');}
  try{
   await page.goto(origin);await page.locator('#auth').waitFor({state:'visible'});await resolved('light');
+  await page.emulateMedia({colorScheme:'dark'});await resolved('dark');await page.emulateMedia({colorScheme:'light'});await resolved('light');
   await choose('#authThemeButton','dark');await resolved('dark');await page.reload();await page.locator('#auth').waitFor({state:'visible'});await resolved('dark');
-  await choose('#authThemeButton','system');await page.emulateMedia({colorScheme:'dark'});await resolved('dark');await page.emulateMedia({colorScheme:'light'});await resolved('light');
-  console.log('PASS theme works before sign-in, persists on reload, and follows system appearance');
+  await page.emulateMedia({colorScheme:'light'});await resolved('dark');await choose('#authThemeButton','light');
+  console.log('PASS default system theme, one-click switching before sign-in, reload persistence and explicit preference');
   await page.locator('input[name=email]').fill('browser-owner@example.test');await page.locator('input[name=password]').fill('browser-test-password-only');await page.locator('#authSubmit').click();
   await page.locator('#projectHome').waitFor({state:'visible'});await page.locator('.project-entry').first().waitFor();
   await choose('#homeThemeButton','dark');await resolved('dark');
@@ -25,8 +26,8 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await choose('#themeButton','light');await resolved('light');assert.equal(await page.locator('#code').inputValue(),source);assert.equal(await page.locator('#pdfFrame').getAttribute('src'),pdf);
   await choose('#themeButton','dark');await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile editor must fit the viewport with the theme control');
-  await page.locator('#accountButton').click();await page.locator('#accountAppearance').click();assert.equal(await page.locator('#themePreference').inputValue(),'dark');await page.locator('#closeAppearance').click();
+  await page.locator('#accountButton').click();await page.locator('#accountAppearance').click();assert.equal(await page.locator('#themePreference').inputValue(),'dark');await page.locator('#themePreference').selectOption('system');await page.locator('#closeAppearance').click();await resolved('light');await page.emulateMedia({colorScheme:'dark'});await resolved('dark');
   await page.locator('#accountButton').click();await page.locator('#signOut').click();await page.locator('#auth').waitFor({state:'visible'});await resolved('dark');
-  assert.deepEqual(errors,[]);console.log('PASS editor/account controls, mobile sizing, unchanged source/PDF and themed sign-out');
+  assert.deepEqual(errors,[]);console.log('PASS one-click editor controls, System in account settings, mobile sizing, unchanged source/PDF and themed sign-out');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

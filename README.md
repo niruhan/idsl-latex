@@ -26,23 +26,26 @@ Use `./labtex stop` to stop and `./labtex start` to return later. Already cloned
 
 Shared hosting requires x86_64 Linux, Python 3.10+, systemd, cgroup v2, and Bubblewrap. Follow the **[Linux installation guide](docs/INSTALL_LINUX.md)** for prerequisites, setup, invitations, and optional HTTPS access. The Mac runner is for personal, local use.
 
-## Write and organize
+## Features
 
-- Browse projects as cards or a list; search, sort, and filter by format or ownership.
-- Click a project to enter its editor. **My projects** saves your edits and returns home.
-- Write in LaTeX or Typst, compile beside your source, and export PDF or project ZIP.
-- Use **Appearance** beside your avatar for **Light**, **Dark**, or **System**.
-- Use **Backup** to save sources to one GitHub repository for all projects, or a separate repository per document. [Configure GitHub backups →](docs/LOCAL.md#github-backups)
+- **Project explorer:** cards or list, search, sorting, and filters for format and ownership. Click a project to edit; **My projects** saves and returns home.
+- **LaTeX + Typst:** source and basic visual editing, multi-file projects, figures, and bibliographies.
+- **PDF preview:** manual or automatic compilation, clickable error locations, and PDF download.
+- **Sharing:** invite coauthors to individual projects with editor or view-only access.
+- **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.
+- **GitHub backups:** keep all projects in one repository or use a separate repository per document; optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
+- **Import/export:** import project ZIPs (including Overleaf exports), upload assets, and download complete source ZIPs.
+- **Themes:** switch light/dark with one click on the sun/moon button; **Account → Appearance** also offers **System**.
 
 Visual mode supports basic headings, paragraphs, emphasis, and Typst lists. Advanced equations/templates remain editable in source cards. The Typst sample belongs to your account; repeat visits preserve edits and avoid duplicates.
 
 ## Screenshots
 
-![Project explorer with LaTeX and Typst documents](docs/images/projects.png)
+![Typst editor with source and compiled PDF](docs/images/typst-workspace.png)
 
-| Typst editor | Dark theme |
+| Project explorer | Dark theme |
 | --- | --- |
-| [![Typst source and compiled PDF](docs/images/typst-workspace.png)](docs/images/typst-workspace.png) | [![Dark Typst editor](docs/images/dark-theme.png)](docs/images/dark-theme.png) |
+| [![Project explorer with LaTeX and Typst documents](docs/images/projects.png)](docs/images/projects.png) | [![Dark Typst editor](docs/images/dark-theme.png)](docs/images/dark-theme.png) |
 
 More views: [LaTeX](docs/images/workspace.png) · [Visual editor](docs/images/visual-editor.png) · [Project list](docs/images/projects-list.png) · [Mobile](docs/images/projects-mobile.png) · [Sharing](docs/images/sharing.png) · [GitHub backups](docs/images/github-backups.png).
 
