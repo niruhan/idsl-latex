@@ -50,6 +50,21 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   console.log('PASS real Tinymist incremental preview without iframe reload/PDF builds, LSP completion/hover/definition/formatting, undo/redo with live preview, diagnostics, recovery, source reveal and dark preview');
 
   const download=page.waitForEvent('download');await page.locator('#downloadButton').click();const pdf=await download;assert.equal(pdf.suggestedFilename(),'Live research notebook.pdf');const pdfPath=path.join(output,'tinymist-export.pdf');await pdf.saveAs(pdfPath);assert.equal(fs.readFileSync(pdfPath).subarray(0,4).toString(),'%PDF');assert.equal(pdfBuilds,1);
+  const endpoint=base+'/typst/'+sessions[0];
+  const afterDownload=await page.waitForResponse(response=>response.url().endsWith(endpoint)&&response.request().method()==='GET');
+  assert.equal(afterDownload.status(),200,'Export PDF must keep the live compiler session running');
+  assert.equal(await page.locator('#typstFrame').getAttribute('src'),initialSrc);await frame.locator('#typst-app svg').first().waitFor({state:'visible'});
+  const exportedSvg=await frame.locator('#typst-app').innerHTML();await page.locator('#code').fill(source.replace('42','126'));await page.locator('#code').evaluate(area=>{const index=area.value.lastIndexOf('answer')+2;area.setSelectionRange(index,index);});await page.locator('#typstHover').click();await page.locator('#typstDocumentation').getByText(/126/).waitFor();
+  await page.waitForFunction(previous=>document.querySelector('#typstFrame').contentDocument.querySelector('#typst-app').innerHTML!==previous,exportedSvg);
+  const zipDownload=page.waitForEvent('download');await page.locator('#exportSourceButton').click();const zip=await zipDownload;assert.equal(zip.suggestedFilename(),'Live research notebook.zip');
+  const afterZip=await page.waitForResponse(response=>response.url().endsWith(endpoint)&&response.request().method()==='GET');assert.equal(afterZip.status(),200,'Source ZIP export must keep the live session running');assert.equal(sessions.length,1,'Exports must preserve the existing worker, not reconnect it');
+  await frame.locator('#typst-app svg').first().waitFor({state:'visible'});console.log('PASS PDF/source downloads preserve the live session, visible preview, subsequent edits and LSP');
+  // A leave warning that the user cancels must preserve the compiler as well.
+  await page.locator('#code').fill(source.replace('42','168'));
+  page.once('dialog',dialog=>{assert.equal(dialog.type(),'beforeunload');dialog.dismiss();});
+  await assert.rejects(page.goto(origin+'/'),/ERR_ABORTED/);assert.equal(new URL(page.url()).hash,'#project='+pid);
+  const afterCancelledLeave=await page.waitForResponse(response=>response.url().endsWith(endpoint)&&response.request().method()==='GET');assert.equal(afterCancelledLeave.status(),200);assert.equal(sessions.length,1);await frame.locator('#typst-app svg').first().waitFor({state:'visible'});
+  console.log('PASS cancelled page navigation preserves the active preview session');
   await page.locator('#showPdfPreview').click();await page.locator('#pdfFrame').waitFor({state:'visible'});assert.equal(await page.locator('#typstFrame').isHidden(),true);await page.locator('#showLivePreview').click();await page.locator('#typstFrame').waitFor({state:'visible'});
   await page.locator('.tree-file[title="main.typ"]').click({button:'right'});await page.locator('#renameFile').click();await page.locator('#renameFilePath').fill('renamed.typ');await page.locator('#confirmRenameFile').click();
   await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='renamed.typ'&&document.querySelector('#buildStatus').textContent.startsWith('Live ·'));
@@ -58,6 +73,13 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const sid=sessions[1];await page.locator('#projectsNavButton').click();await page.locator('#projectHome').waitFor({state:'visible'});
   await page.waitForFunction(()=>document.querySelector('#typstFrame').getAttribute('src')==='about:blank');
   const ended=await context.request.get(origin+base+'/typst/'+sid);assert.equal(ended.status(),404,'Leaving a project releases its live session');
-  assert.deepEqual(errors,[]);console.log('PASS project-named real PDF export, Live/PDF switching, main-document rename/reconnect and session cleanup on explorer navigation');
+  await page.locator('.project-entry[href="#project='+pid+'"]').click();await page.locator('#typstFrame').waitFor({state:'visible'});await frame.locator('#typst-app svg').first().waitFor({state:'visible'});
+  const pageExitSession=sessions.at(-1);await page.goto(origin+'/favicon.svg');let exitStatus;
+  for(let attempt=0;attempt<50;attempt++){exitStatus=(await context.request.get(origin+base+'/typst/'+pageExitSession)).status();if(exitStatus===404)break;await new Promise(resolve=>setTimeout(resolve,100));}
+  assert.equal(exitStatus,404,'Actual page exit releases its worker');
+  await page.goBack();await page.locator('#typstFrame').waitFor({state:'visible'});await frame.locator('#typst-app svg').first().waitFor({state:'visible'});
+  assert.notEqual(sessions.at(-1),pageExitSession);assert.equal((await context.request.get(origin+base+'/typst/'+sessions.at(-1))).status(),200,'Returning to the editor starts a working live session');
+  await page.locator('#projectsNavButton').click();await page.locator('#projectHome').waitFor({state:'visible'});
+  assert.deepEqual(errors,[]);console.log('PASS project-named real PDF export, Live/PDF switching, main-document rename/reconnect, page-exit cleanup and browser Back recovery');
  }finally{if(pid)await api('/api/projects/'+pid,'DELETE',{});await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});

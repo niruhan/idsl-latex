@@ -169,6 +169,9 @@ export function createTypstLive({api,state,setText,navigate,compile,updateBuild,
  },true);
  $('code').addEventListener('click',()=>{closeCompletion();if(languageFile())documentation().catch(()=>{});});
  document.addEventListener('pointerdown',event=>{if(!event.target.closest('#typstCompletions,#typstComplete'))closeCompletion();});
- window.addEventListener('beforeunload',()=>{if(session)navigator.sendBeacon(endpoint(),new Blob([JSON.stringify({operation:'close'})],{type:'application/json'}));});
+ // Downloads and cancelled navigation can fire beforeunload while this editor
+ // stays open. Release the worker only once the page actually leaves.
+ window.addEventListener('pagehide',()=>{if(session)navigator.sendBeacon(endpoint(),new Blob([JSON.stringify({operation:'close'})],{type:'application/json'}));});
+ window.addEventListener('pageshow',event=>{if(event.persisted&&state().project)open().catch(report);});
  return {open,stop,changed,flush,render,get active(){return active();},get starting(){return starting;}};
 }
