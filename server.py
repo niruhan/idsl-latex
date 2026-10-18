@@ -2,6 +2,7 @@
 """LabTeX application server. Python 3.9+, no runtime Python packages."""
 import argparse, base64, hashlib, hmac, ipaddress, json, mimetypes, os, re, secrets, socket, sqlite3, threading, time
 import urllib.error, urllib.parse, urllib.request
+import sys
 from contextlib import contextmanager
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,8 +12,14 @@ from github_backup import destination, GitHub, backup_snapshot
 from project_templates import TEMPLATES, template_files
 from credential_store import token_store, valid_token
 from typst_service import TypstService
+from project_changes import source_files, apply_changes
+from doi_metadata import lookup_doi
+from github_restore import inspect_backups, read_snapshot, changes_between, source_diff
+from github_collaboration import Collaboration
+from deploy.updates import Updates
 ROOT=Path(__file__).resolve().parent
 PDF_ASSETS={'/vendor/pdfjs/'+name:'vendor/pdfjs/'+name for name in json.loads((ROOT/'web/vendor/pdfjs/UPSTREAM.json').read_text())['files']}
+IMAGE_TYPES={'svg':'image/svg+xml','png':'image/png','apng':'image/apng','jpg':'image/jpeg','jpeg':'image/jpeg','jpe':'image/jpeg','jfif':'image/jpeg','gif':'image/gif','webp':'image/webp','avif':'image/avif','bmp':'image/bmp','ico':'image/x-icon','tif':'image/tiff','tiff':'image/tiff','heic':'image/heic','heif':'image/heif'}
 MAX_OWNED_PROJECTS=25
 MAX_PROJECT_FOLDERS=100
 MAX_FOLDER_DEPTH=10
@@ -30,7 +37,7 @@ def export_disposition(project_name, extension, attachment=True):
 class BoundedHTTPServer(ThreadingHTTPServer):
     daemon_threads=True
     def service_actions(self):
-        try: self.app.cleanup_trash()
+        try: self.app.cleanup_trash(); self.app.cleanup_reviews()
         except sqlite3.OperationalError: pass  # Retry cleanup after a temporary database lock.
     def __init__(self,*args,**kwargs):
         self.slots=threading.BoundedSemaphore(8)
@@ -50,7 +57,7 @@ class BoundedHTTPServer(ThreadingHTTPServer):
         try: super().process_request_thread(request,address)
         finally: self.slots.release()
     def server_close(self):
-        if getattr(self,'app',None): self.app.typst.close()
+        if getattr(self,'app',None): self.app.typst.close();self.app.updates.close()
         super().server_close()
 
 def digest(s): return hashlib.sha256(s.encode()).hexdigest()
@@ -68,7 +75,7 @@ def email_address(s):
     return s
 
 def delete_project_rows(db,pid):
-    for table in ('members','files','directories','history','invites','builds','build_sources','project_backups','shared_project_backups','project_locations','project_trash'):
+    for table in ('members','files','directories','history','invites','builds','build_sources','project_previews','project_backups','shared_project_backups','project_locations','project_trash','project_checkpoints','project_collaboration'):
         db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
     db.execute('DELETE FROM projects WHERE id=?',(pid,))
 
@@ -79,8 +86,12 @@ class App:
         self.tokens=token_store(self.data)
         self.typst=TypstService(self)
         self.setup_token=os.getenv('SETUP_TOKEN') or secrets.token_urlsafe(24)
-        self.lock=threading.Lock(); self.jobs=set(); self.attempts={}
+        self.lock=threading.Lock(); self.jobs=set(); self.attempts={}; self.review_plans={}
+        self.collab=Collaboration(self)
+        managed=sys.platform=='darwin' and os.getenv('LABTEX_LOCAL_MANAGED_ROOT')==str(ROOT) and self.data==ROOT/'data' and not compiler_url and not demo
+        self.updates=Updates(ROOT,ROOT/'.local' if managed else self.data/'.updates',enabled=managed)
         self.trash_lock=threading.Lock(); self.trash_checked=0
+        self.reviews_checked=0
         with self.db() as db:
             db.executescript('''PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT UNIQUE,name TEXT,password TEXT);
@@ -91,9 +102,12 @@ CREATE TABLE IF NOT EXISTS members(project_id TEXT,user_id TEXT,role TEXT,PRIMAR
 CREATE TABLE IF NOT EXISTS files(project_id TEXT,path TEXT,content BLOB,revision INTEGER,PRIMARY KEY(project_id,path));
 CREATE TABLE IF NOT EXISTS directories(project_id TEXT,path TEXT,PRIMARY KEY(project_id,path));
 CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY,project_id TEXT,path TEXT,content BLOB,revision INTEGER,author TEXT,created REAL);
+CREATE TABLE IF NOT EXISTS project_checkpoints(id INTEGER PRIMARY KEY,project_id TEXT NOT NULL,created REAL NOT NULL,source BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS project_collaboration(project_id TEXT PRIMARY KEY,repository TEXT NOT NULL,branch TEXT NOT NULL,folder TEXT NOT NULL,remote_id TEXT NOT NULL,base_commit TEXT NOT NULL,base_main TEXT NOT NULL,baseline BLOB NOT NULL,updated REAL NOT NULL,local_revision INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS invites(token TEXT PRIMARY KEY,project_id TEXT,role TEXT,expires REAL);
 CREATE TABLE IF NOT EXISTS builds(project_id TEXT PRIMARY KEY,revision INTEGER,success INTEGER,log TEXT,pdf BLOB,seconds REAL,created REAL,engine TEXT);
 CREATE TABLE IF NOT EXISTS build_sources(project_id TEXT PRIMARY KEY,created REAL NOT NULL,source_map TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS project_previews(project_id TEXT PRIMARY KEY,created REAL NOT NULL,pdf BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS lab_invites(id TEXT PRIMARY KEY,token TEXT UNIQUE,created REAL,expires REAL,used_by TEXT);
 CREATE TABLE IF NOT EXISTS approved_emails(email TEXT PRIMARY KEY);
@@ -104,7 +118,14 @@ CREATE TABLE IF NOT EXISTS project_folders(id TEXT PRIMARY KEY,user_id TEXT NOT 
 CREATE TABLE IF NOT EXISTS project_locations(user_id TEXT,project_id TEXT,folder_id TEXT,PRIMARY KEY(user_id,project_id));
 CREATE INDEX IF NOT EXISTS project_folders_parent ON project_folders(user_id,parent_id);
 CREATE INDEX IF NOT EXISTS project_locations_folder ON project_locations(user_id,folder_id);
+CREATE INDEX IF NOT EXISTS members_user ON members(user_id,project_id);
+CREATE INDEX IF NOT EXISTS history_project ON history(project_id,id DESC);
+CREATE INDEX IF NOT EXISTS history_file ON history(project_id,path,id DESC);
+CREATE INDEX IF NOT EXISTS checkpoints_project ON project_checkpoints(project_id,id DESC);
 ''')
+            # Preserve the last successful PDF for explorer covers after failed builds.
+            db.execute('''INSERT OR IGNORE INTO project_previews SELECT project_id,created,pdf
+FROM builds WHERE success=1 AND pdf IS NOT NULL''')
             # Older shared snapshots did not track their destination separately.
             # Retain matching repository history without claiming branch verification.
             db.execute('''INSERT OR IGNORE INTO shared_project_backups
@@ -217,6 +238,15 @@ WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_tras
                     delete_project_rows(db,pid);self.typst.discard(pid=pid)
             self.trash_checked=time.time()
         finally: self.trash_lock.release()
+    def cleanup_reviews(self,force=False):
+        now=time.time()
+        with self.lock:
+            if not force and now-self.reviews_checked<60:return
+            for plans in (self.review_plans,self.collab.plans):
+                for key,plan in list(plans.items()):
+                    if not plan['busy'] and plan['expires']<=now:del plans[key]
+            self.reviews_checked=now
+
     def touch(self,db,pid): db.execute('UPDATE projects SET revision=revision+1,updated=? WHERE id=?',(time.time(),pid))
     def file_tree(self,db,pid):
         files={row['path'] for row in db.execute('SELECT path FROM files WHERE project_id=?',(pid,))}
@@ -343,6 +373,8 @@ WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_tras
                 # Permission might have been revoked while the compiler ran.
                 self.access(db,pid,user,write=True)
                 db.execute('INSERT OR REPLACE INTO builds VALUES(?,?,?,?,?,?,?,?)',(pid,project['revision'],int(result['success']),result['log'],pdf,result['seconds'],created,result['engine']))
+                if result['success'] and pdf:
+                    db.execute('INSERT OR REPLACE INTO project_previews VALUES(?,?,?)',(pid,created,pdf))
                 db.execute('DELETE FROM build_sources WHERE project_id=?',(pid,))
                 if mapping:
                     db.execute('INSERT INTO build_sources VALUES(?,?,?)',(pid,created,json.dumps(mapping)))
@@ -369,6 +401,8 @@ WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_tras
             with self.db() as db:
                 db.execute('BEGIN')
                 project=self.access(db,pid,user,owner=True)
+                if db.execute('SELECT 1 FROM project_collaboration WHERE project_id=?',(pid,)).fetchone():
+                    raise Problem('This project uses GitHub collaboration. Use Review & sync instead of snapshot backup.',409)
                 settings=db.execute('SELECT * FROM project_backups WHERE project_id=?',(pid,)).fetchone()
                 shared=shared_target is not None or not settings or settings['mode']=='shared'
                 target=shared_target if shared_target is not None else db.execute('SELECT * FROM backup_settings WHERE user_id=?',(user['id'],)).fetchone() if shared else settings
@@ -397,6 +431,73 @@ WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_tras
         token=value or self.tokens.get(user['id'])
         if not token: raise Problem('Enter and save your GitHub token first.')
         return valid_token(token)
+
+    def github_preview(self,user,data):
+        pid=data.get('projectId')
+        with self.db() as db:
+            project=self.access(db,pid,user,owner=True) if pid else None
+            if pid and db.execute('SELECT 1 FROM project_collaboration WHERE project_id=?',(pid,)).fetchone():
+                raise Problem('This project is connected for collaboration. Use Review & sync to preserve local edits.',409)
+            local={r['path']:r['content'] for r in db.execute('SELECT path,content FROM files WHERE project_id=?',(pid,))} if pid else {}
+        join=data.get('collaborate',False)
+        if type(join) is not bool or join and pid: raise Problem('Join collaboration as a new local project.')
+        snapshot=read_snapshot(GitHub(self.backup_token(user,data.get('token'))),data,data.get('folder',''),data.get('commit'),managed_only=join)
+        if join and snapshot['metadata'].get('collaboration')!=1: raise Problem('Ask the project owner to enable GitHub collaboration in their editor first.',409)
+        changes=changes_between(local,snapshot['files'])
+        plan={'id':secrets.token_hex(16),'user':user['id'],'project':project,'local':local,'snapshot':snapshot,'changes':changes,'expires':time.time()+900,'busy':False,'collaborate':join}
+        cost=lambda value:sum(map(len,value['local'].values()))+sum(map(len,value['snapshot']['files'].values()))
+        with self.lock:
+            self.review_plans={key:value for key,value in self.review_plans.items() if value['expires']>time.time() or value['busy']}
+            while self.review_plans and (len(self.review_plans)>=8 or sum(map(cost,self.review_plans.values()))+cost(plan)>128*1024*1024):
+                key=next((key for key,value in self.review_plans.items() if not value['busy']),None)
+                if key is None: raise Problem('Other restores are running. Retry shortly.',429)
+                del self.review_plans[key]
+            self.review_plans[plan['id']]=plan
+        return {key:snapshot[key] for key in ('repository','branch','commit','folder','name','main','ignored')} | {'planId':plan['id'],'changes':changes,'projectId':pid,'revision':project['revision'] if project else None}
+
+    def github_plan(self,user,plan_id):
+        with self.lock:
+            plan=self.review_plans.get(plan_id) if isinstance(plan_id,str) else None
+            if not plan or plan['user']!=user['id'] or plan['expires']<=time.time():
+                raise Problem('This review expired. Inspect the backup again.',404)
+            return plan
+
+    def apply_github_plan(self,user,data):
+        plan=self.github_plan(user,data.get('planId'));snapshot=plan['snapshot'];project=plan['project']
+        paths=data.get('paths')
+        if not isinstance(paths,list) or not paths or len(paths)>MAX_FILES or any(not isinstance(path,str) for path in paths): raise Problem('Select at least one file change.')
+        selected=set(paths);allowed={item['path'] for item in plan['changes']}
+        if len(selected)!=len(paths) or not selected<=allowed: raise Problem('Select only changes from this review.')
+        join=data.get('collaborate',False)
+        if type(join) is not bool or join and (not plan.get('collaborate') or project or selected!=set(snapshot['files'])):
+            raise Problem('Include all shared project files when joining collaboration.')
+        with self.lock:
+            if plan['busy']: raise Problem('This restore is already running.',429)
+            plan['busy']=True
+        try:
+            with self.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                if project:
+                    current=self.access(db,project['id'],user,owner=True)
+                    if db.execute('SELECT 1 FROM project_collaboration WHERE project_id=?',(project['id'],)).fetchone():
+                        raise Problem('This project now uses collaboration. Use Review & sync.',409)
+                    rows={row['path']:row for row in db.execute('SELECT path,revision FROM files WHERE project_id=?',(project['id'],))}
+                    edits=[{'path':path,'revision':rows[path]['revision'] if path in rows else 0,**({'base64':base64.b64encode(snapshot['files'][path]).decode()} if path in snapshot['files'] else {'delete':True})} for path in sorted(selected)]
+                    final_paths=(set(plan['local'])-selected)|(selected&set(snapshot['files']))
+                    main=snapshot['main'] if snapshot['main'] in final_paths else current['main']
+                    result=apply_changes(self,db,current,user,edits,project['revision'],main=main,checkpoint=True)
+                    result['id']=project['id']
+                else:
+                    files={path:snapshot['files'][path] for path in selected}
+                    if snapshot['main'] not in files: raise Problem('Include the main document in the restore.')
+                    pid=self.new_project(db,user['id'],data.get('name') or snapshot['name'],files,data.get('folder'))
+                    db.execute('UPDATE projects SET main=? WHERE id=?',(snapshot['main'],pid))
+                    if join:self.collab.attach(db,pid,snapshot,1)
+                    result={'id':pid,'changed':sorted(files),'checkpoint':None}
+            with self.lock: self.review_plans.pop(plan['id'],None)
+            return {**result,'commit':snapshot['commit']}
+        finally:
+            with self.lock: plan['busy']=False
 
 class Handler(BaseHTTPRequestHandler):
     server_version='LabTeX'
@@ -470,11 +571,12 @@ class Handler(BaseHTTPRequestHandler):
             url=urllib.parse.urlsplit(self.path)
             path=urllib.parse.unquote(url.path);data={}
             if method!='GET':
+                if self.app.updates.blocked():raise Problem('An approved app update is restarting. Your browser draft is kept; retry after it finishes.',503)
                 public=method=='POST' and path in PUBLIC_POSTS
                 if not public:
                     with self.app.db() as db: self.user(db)
-                large=(path=='/api/projects' and method=='POST') or (method=='PUT' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/file',path)) or (method=='POST' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/typst/[a-f0-9]{32}',path))
-                bulk_delete=method=='POST' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/delete-files',path)
+                large=(path=='/api/projects' and method=='POST') or (method=='PUT' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/file',path)) or (method=='POST' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/(?:typst/[a-f0-9]{32}|edit-files|collaboration/sync)',path))
+                bulk_delete=method=='POST' and (re.fullmatch(r'/api/projects/[a-f0-9]{24}/delete-files',path) or path=='/api/github-apply')
                 data=self.body(256*1024 if bulk_delete else 58*1024*1024 if large else (16384 if public else 65536))
             self.body_deadline.cancel()
             result=self.route(method,path,urllib.parse.parse_qs(url.query),data)
@@ -486,6 +588,37 @@ class Handler(BaseHTTPRequestHandler):
             import traceback; traceback.print_exc(); self.send({'error':'The server could not complete this request.'},500)
     def route(self,method,path,query,data):
         app=self.app
+        if path=='/api/app-update/health' and method=='GET':
+            return {'version':app.updates.current['version'],'busy':bool(app.jobs)}
+        if path.startswith('/api/app-update'):
+            with app.db() as db:
+                user=self.user(db);admin=app.is_lab_admin(db,user) and not app.demo
+            if path=='/api/app-update' and method=='GET':return app.updates.status(admin)
+            if not admin:raise Problem('Only the installation administrator can manage app updates.',403)
+            if path=='/api/app-update/check' and method=='POST':app.updates.check(force=True);return app.updates.status(admin)
+            if path=='/api/app-update/preferences' and method=='PUT':app.updates.preference(data.get('automatic'));return app.updates.status(admin)
+            if path=='/api/app-update/install' and method=='POST':
+                with app.lock:
+                    if app.jobs:raise Problem('Wait for the current compile or GitHub operation before updating.',409)
+                    try:return app.updates.install(data)
+                    except ValueError as error:raise Problem(str(error),409) from None
+            raise Problem('Not found.',404)
+        collaboration=re.fullmatch(r'/api/projects/([a-f0-9]{24})/collaboration(?:/(connect|review|file|sync|check))?',path)
+        if collaboration:
+            pid,operation=collaboration.groups()
+            with app.db() as db:user=self.user(db);app.access(db,pid,user,owner=True)
+            if operation is None:
+                if method=='GET':return app.collab.describe(user,pid)
+                if method=='DELETE':return app.collab.disconnect(user,pid)
+            if operation=='file' and method=='GET':
+                plan=app.collab.plan(user,pid,query.get('planId',[''])[0]);name=safe_path(query.get('path',[''])[0]);side=query.get('version',[''])[0]
+                if side not in ('local','remote','base'):raise Problem('Choose a reviewed source version.')
+                files=plan['snapshot']['files'] if side=='remote' else plan[side]
+                if name not in files:raise Problem('File not found.',404)
+                self.send(files[name],kind='application/octet-stream',headers={'Content-Disposition':export_disposition(name.rsplit('/',1)[-1],'',True)});return
+            if method=='POST' and operation in ('connect','review','file','sync','check'):
+                return getattr(app.collab,operation)(user,pid,data)
+            raise Problem('Not found.',404)
         live=re.fullmatch(r'/api/projects/([a-f0-9]{24})/typst(?:/([a-f0-9]{32})(/preview/)?)?',path)
         if live:
             pid,sid,preview=live.groups()
@@ -543,6 +676,19 @@ class Handler(BaseHTTPRequestHandler):
             elif method=='DELETE': app.tokens.delete(user['id'])
             elif method!='GET': raise Problem('Not found.',404)
             return {'saved':app.tokens.has(user['id']),'storage':app.tokens.label}
+        if path=='/api/doi' and method=='POST':
+            with app.db() as db: self.user(db)
+            return lookup_doi(data.get('doi'))
+        if path in ('/api/github-backups','/api/github-preview','/api/github-diff','/api/github-apply') and method=='POST':
+            with app.db() as db: user=self.user(db)
+            if path=='/api/github-backups': return inspect_backups(GitHub(app.backup_token(user,data.get('token'))),data)
+            if path=='/api/github-preview': return app.github_preview(user,data)
+            if path=='/api/github-apply': return app.apply_github_plan(user,data)
+            plan=app.github_plan(user,data.get('planId'));name=safe_path(data.get('path'))
+            if name not in {item['path'] for item in plan['changes']}: raise Problem('Change not found.',404)
+            if plan['project']:
+                with app.db() as db: app.access(db,plan['project']['id'],user,owner=True)
+            return source_diff(name,plan['local'].get(name),plan['snapshot']['files'].get(name))
         if path=='/api/backups' and method=='POST':
             shared_only=data.get('sharedOnly',False)
             if type(shared_only) is not bool: raise Problem('Choose a valid backup layout.')
@@ -559,6 +705,10 @@ class Handler(BaseHTTPRequestHandler):
             results=[]
             for project in projects:
                 pid=project['id']
+                with app.db() as db:
+                    linked=db.execute('SELECT 1 FROM project_collaboration WHERE project_id=?',(pid,)).fetchone()
+                if linked:
+                    results.append({'id':pid,'name':project['name'],'skipped':True,'reason':'Collaborative project: use Review & sync.'});continue
                 try: results.append({'id':pid,**app.backup(pid,user,token,shared_target,client=client)})
                 except Problem as error: results.append({'id':pid,'name':project['name'],'error':str(error)})
             return {'results':results}
@@ -575,13 +725,19 @@ class Handler(BaseHTTPRequestHandler):
                     target=dict(row)
             return app.backup(backup_match[1],user,app.backup_token(user,data.get('token')),shared_target=target)
         if method=='GET' and not path.startswith('/api/'):
-            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/edit-history.js':'edit-history.js','/source-folding.js':'source-folding.js','/source-editing.js':'source-editing.js','/completions.js':'completions.js','/typst-live.js':'typst-live.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
+            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/html.js':'html.js','/edit-history.js':'edit-history.js','/source-folding.js':'source-folding.js','/source-editing.js':'source-editing.js','/completions.js':'completions.js','/typst-live.js':'typst-live.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
             allowed.update(PDF_ASSETS)
+            allowed.update({name:name[1:] for name in ('/workspace-tabs.js','/workspace-tools.js','/workspace-tools.css','/project-analysis.js','/project-worker.js','/project-covers.js','/source-search.js','/collaboration.js','/app-updates.js')})
             allowed.update({name:name[1:] for name in ('/pdf-viewer.html','/pdf-viewer.js','/pdf-viewer.css')})
             if path not in allowed: raise Problem('Not found.',404)
             f=ROOT/'web'/allowed[path]
-            headers={'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src 'self' blob: data:; worker-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'"} if path=='/pdf-viewer.html' else None
-            self.send(f.read_bytes(),kind=mimetypes.guess_type(f)[0] or 'application/octet-stream',headers=headers); return
+            stamp=f.stat();tag='"'+str(stamp.st_mtime_ns)+'-'+str(stamp.st_size)+'"'
+            headers={'Cache-Control':'private, no-cache','ETag':tag}
+            kind=mimetypes.guess_type(f)[0] or 'application/octet-stream'
+            if path=='/pdf-viewer.html':headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src 'self' blob: data:; worker-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'"
+            if self.headers.get('If-None-Match')==tag:
+                self.send(b'',304,kind=kind,headers=headers);return
+            self.send(f.read_bytes(),kind=kind,headers=headers); return
         with app.db() as db:
             if path=='/api/session' and method=='GET':
                 try: user=self.user(db)
@@ -700,7 +856,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not invite: raise Problem('Invitation has expired or was used.',403)
                 db.execute('INSERT OR IGNORE INTO members VALUES(?,?,?)',(invite['project_id'],user['id'],invite['role'])); db.execute('DELETE FROM invites WHERE token=?',(invite['token'],)); return {'id':invite['project_id']}
             if path=='/api/projects':
-                if method=='GET': return {'projects':[dict(x) for x in db.execute('SELECT p.id,p.name,p.main,p.updated,m.role,l.folder_id AS folder FROM projects p JOIN members m ON p.id=m.project_id LEFT JOIN project_locations l ON l.project_id=p.id AND l.user_id=m.user_id WHERE m.user_id=? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=p.id) ORDER BY p.updated DESC',(user['id'],))]}
+                if method=='GET': return {'projects':[dict(x) for x in db.execute('SELECT p.id,p.name,p.main,p.updated,m.role,l.folder_id AS folder,v.created AS preview FROM projects p JOIN members m ON p.id=m.project_id LEFT JOIN project_locations l ON l.project_id=p.id AND l.user_id=m.user_id LEFT JOIN project_previews v ON v.project_id=p.id WHERE m.user_id=? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=p.id) ORDER BY p.updated DESC',(user['id'],))]}
                 if method=='POST':
                     db.execute('BEGIN IMMEDIATE')
                     directories=()
@@ -719,6 +875,15 @@ class Handler(BaseHTTPRequestHandler):
             # Duplicating needs read access, like downloading and reimporting source.
             p=app.access(db,pid,user,write=method!='GET' and action not in ('folder','duplicate'))
             if action=='duplicate' and method=='POST': return app.duplicate_project(db,p,user)
+            if action=='sources' and method=='GET': return {'files':source_files(db,pid),'revision':p['revision'],'main':p['main']}
+            if action=='edit-files' and method=='POST': return apply_changes(app,db,p,user,data.get('files'),data.get('revision'),checkpoint=True)
+            if action=='checkpoints' and method=='GET':
+                return {'checkpoints':[dict(r) for r in db.execute('SELECT id,created FROM project_checkpoints WHERE project_id=? ORDER BY id DESC',(pid,))]}
+            checkpoint=re.fullmatch(r'checkpoints/(\d+)\.zip',action or '')
+            if checkpoint and method=='GET':
+                row=db.execute('SELECT source FROM project_checkpoints WHERE id=? AND project_id=?',(checkpoint[1],pid)).fetchone()
+                if not row: raise Problem('Checkpoint not found.',404)
+                self.send(row['source'],kind='application/zip',headers={'Content-Disposition':export_disposition(p['name']+' - before changes','.zip')});return
             if action=='delete-files' and method=='POST': return app.delete_files(db,p,data)
             if action=='directories' and method=='POST': return app.create_directory(db,p,data)
             if action=='folder' and method=='PUT':
@@ -745,9 +910,17 @@ class Handler(BaseHTTPRequestHandler):
             if action is None:
                 if method=='GET':
                     p['folder']=app.project_location(db,user['id'],pid)
+                    p['collaboration']=bool(db.execute('SELECT 1 FROM project_collaboration WHERE project_id=?',(pid,)).fetchone())
+                    b=db.execute('SELECT revision,success,seconds,created,engine FROM builds WHERE project_id=?',(pid,)).fetchone();p['build']=dict(b) if b else None
+                    # Access is checked on every request, including unchanged
+                    # responses. No file-tree or BLOB work is needed when idle.
+                    tag='"'+hashlib.sha256(json.dumps(p,sort_keys=True).encode()).hexdigest()[:32]+'"'
+                    if self.headers.get('If-None-Match')==tag:
+                        self.send(b'',304,kind='application/json; charset=utf-8',headers={'ETag':tag});return
                     p['files']=[dict(x) for x in db.execute('SELECT path,length(content) AS size,revision FROM files WHERE project_id=? ORDER BY path',(pid,))]
-                    p['directories']=sorted(app.file_tree(db,pid)[1])
-                    b=db.execute('SELECT revision,success,seconds,created,engine FROM builds WHERE project_id=?',(pid,)).fetchone(); p['build']=dict(b) if b else None; return p
+                    explicit=[row['path'] for row in db.execute('SELECT path FROM directories WHERE project_id=?',(pid,))]
+                    p['directories']=sorted(directory_paths([file['path'] for file in p['files']],explicit))
+                    self.send(p,headers={'ETag':tag});return
                 if method=='PUT':
                     if 'main' in data:
                         main=safe_path(data['main'])
@@ -759,6 +932,15 @@ class Handler(BaseHTTPRequestHandler):
                     app.access(db,pid,user,owner=True)
                     db.execute('INSERT INTO project_trash VALUES(?,?)',(pid,time.time()))
                     db.execute('DELETE FROM invites WHERE project_id=?',(pid,));app.typst.discard(pid=pid);return {'ok':True}
+            if action=='image' and method=='GET':
+                name=safe_path(query.get('path',[''])[0]);kind=IMAGE_TYPES.get(name.rsplit('.',1)[-1].lower())
+                if not kind: raise Problem('Choose an image file.',415)
+                row=db.execute('SELECT content,revision FROM files WHERE project_id=? AND path=?',(pid,name)).fetchone()
+                if not row: raise Problem('Image not found.',404)
+                if query.get('v',[str(row['revision'])])[0]!=str(row['revision']): raise Problem('Image changed. Refresh the file tree.',409)
+                # SVG is an image resource, never executable page markup. The
+                # restrictive response policy also applies to direct navigation.
+                self.send(row['content'],kind=kind,headers={'Content-Security-Policy':"default-src 'none'; sandbox; frame-ancestors 'none'"});return
             if action=='file':
                 name=safe_path(query.get('path',[data.get('path','')])[0]); row=db.execute('SELECT * FROM files WHERE project_id=? AND path=?',(pid,name)).fetchone()
                 if method=='GET':
@@ -813,6 +995,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not row or not row['source_map']: return {'files':[],'pages':{}}
                 if query.get('v',[None])[0]!=str(row['created']): raise Problem('The preview changed. Wait for the latest PDF.',409)
                 return {**json.loads(row['source_map']),'revision':row['revision']}
+            if action=='preview.pdf' and method=='GET':
+                row=db.execute('SELECT created,pdf FROM project_previews WHERE project_id=?',(pid,)).fetchone()
+                if not row: raise Problem('Compile successfully to generate a project preview.',404)
+                if query.get('v',[None])[0]!=str(row['created']): raise Problem('The project preview changed. Refresh projects.',409)
+                self.send(row['pdf'],kind='application/pdf');return
             if action in ('pdf','log') and method=='GET':
                 row=db.execute('SELECT * FROM builds WHERE project_id=?',(pid,)).fetchone()
                 if not row or (action=='pdf' and not row['pdf']): raise Problem('Compile successfully to generate a PDF.',404)

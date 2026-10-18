@@ -99,14 +99,14 @@ export function createFoldDocument(text='',language=''){
 }
 
 export function createSourceFolding({area,gutter,paint,onToggle=()=>{}}){
- const documents=new Map();let current=null,key=null,byLine=new Map(),gutterKey='',prepared=null;
+ const documents=new Map();let current=null,key=null,byLine=new Map(),gutterKey='',prepared=null,paintedView=null;
  const selection=()=>({mode:'source',start:current?.toSource(area.selectionStart)??area.selectionStart,end:current?.toSource(area.selectionEnd)??area.selectionEnd,direction:area.selectionDirection});
  function render(saved=selection()){
   if(!current)return;const top=area.scrollTop,left=area.scrollLeft,value=current.view.text;
   if(area.value!==value)area.value=value;
   const start=current.toVisible(saved.start),end=current.toVisible(saved.end);
   if(area.selectionStart!==start||area.selectionEnd!==end||area.selectionDirection!==saved.direction)area.setSelectionRange(start,end,saved.direction||'none');
-  paint(value);byLine=new Map(current.ranges.map(range=>[range.start,range]));gutter.style.width=Math.max(62,30+String((current.view.lines.at(-1)||0)+1).length*7)+'px';gutterKey='';area.scrollTop=top;area.scrollLeft=left;syncGutter();
+  if(paintedView!==current.view){paintedView=current.view;paint(value);byLine=new Map(current.ranges.map(range=>[range.start,range]));gutter.style.width=Math.max(62,30+String((current.view.lines.at(-1)||0)+1).length*7)+'px';gutterKey='';}area.scrollTop=top;area.scrollLeft=left;syncGutter();
  }
  function syncGutter(){
   if(!current)return;const first=Math.max(0,Math.floor(area.scrollTop/23)-8),last=Math.min(current.view.lines.length,first+Math.ceil(area.clientHeight/23)+17),nextKey=first+':'+last;
@@ -123,7 +123,7 @@ export function createSourceFolding({area,gutter,paint,onToggle=()=>{}}){
  function update(nextKey,text,language,saved){
   const same=key===nextKey,prior=saved||(same?selection():{start:0,end:0,direction:'none'});key=nextKey;
   current=documents.get(key);if(!current){current=createFoldDocument(text,language);documents.set(key,current);}else current.update(text,language);
-  documents.delete(key);documents.set(key,current);while(documents.size>8)documents.delete(documents.keys().next().value);
+  documents.delete(key);documents.set(key,current);let retained=[...documents.values()].reduce((sum,document)=>sum+document.text.length,0);while(documents.size>1&&(documents.size>8||retained>8*1024*1024)){const oldest=documents.keys().next().value;retained-=documents.get(oldest).text.length;documents.delete(oldest);}
   render(prior);
  }
  function select(saved,{focus=false,reveal=true}={}){if(!current)return;if(reveal)current.reveal(saved.start,saved.end);render(saved);if(focus)area.focus();}
@@ -151,5 +151,5 @@ export function createSourceFolding({area,gutter,paint,onToggle=()=>{}}){
  }
  function scrollTo(pos){if(!current)return;const visible=current.toVisible(pos),line=area.value.slice(0,visible).split('\n').length-1;area.scrollTop=Math.max(0,(line-3)*23);area.scrollLeft=0;gutter.scrollTop=area.scrollTop;}
  function atCursor(collapse){if(!current)return;const pos=selection().start,candidates=current.ranges.filter(range=>range.from<=pos&&range.hideEnd>=pos&&current.isClosed(range)!==collapse);const range=candidates.at(-1);if(range)toggle(range.start);}
- return {update,selection,select,input,prepareEdit,scrollTo,all,atCursor,syncGutter,forget(removed){documents.delete(removed);},get folded(){return Boolean(current?.view.gaps.length);},get visibleLine(){return area.value.slice(0,area.selectionStart).split('\n').length-1;}};
+ return {update,selection,select,input,prepareEdit,scrollTo,all,atCursor,syncGutter,visibleRange(start,end){if(!current||current.view.gaps.some(gap=>start<gap.hideEnd&&end>gap.hideStart))return null;return {start:current.toVisible(start),end:current.toVisible(end)};},forget(removed){documents.delete(removed);},get folded(){return Boolean(current?.view.gaps.length);},get visibleLine(){return area.value.slice(0,area.selectionStart).split('\n').length-1;}};
 }

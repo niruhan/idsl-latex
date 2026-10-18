@@ -16,3 +16,18 @@ jobs:
         env:
           TEST_LATEX_ENGINE: pdflatex
         run: python3 -m unittest discover -s tests -v
+  performance:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Install isolated browser test tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/idsl-browser-tools" --no-save playwright@1.62.1
+          node "$RUNNER_TEMP/idsl-browser-tools/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Large-project performance regression checks
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/idsl-browser-tools/node_modules/playwright" python3 tests/run_browser.py --performance

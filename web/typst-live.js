@@ -1,9 +1,9 @@
 // Tinymist language features and persistent preview, using authenticated app routes.
-import {completionContext,localCompletions} from './completions.js';
+import {completionContext,localCompletions,expandSnippet} from './completions.js';
 export function createTypstLive({api,state,setText,navigate,toast,sourceSelection,selectSource,visibleLine}){
  const $=id=>document.getElementById(id);
- let session=null,project=null,mainDocument=null,starting=false,generation=0,timer,pollTimer,completionTimer,flight=null,dirty=false,sequence=0,lastJump=0,lastState=null,capabilities=null,closing=Promise.resolve(),lastError='',unavailable='';
- let choices=[],choice=0,completionSource=null,completionRequest=0;const sourceCache=new Map();
+ let session=null,project=null,mainDocument=null,starting=false,generation=0,timer,pollTimer,completionTimer,flight=null,dirty=false,sequence=0,lastJump=0,lastState=null,lastAccepted='',capabilities=null,closing=Promise.resolve(),lastError='',unavailable='';
+ let choices=[],choice=0,completionSource=null,completionRequest=0;const sourceCache=new Map(),extraChanges=new Map();
  const problems=document.createElement('div');problems.id='typstProblems';problems.className='typst-problems';problems.hidden=true;document.querySelector('.editor-pane').prepend(problems);
  const hover=document.createElement('div');hover.id='typstDocumentation';hover.className='typst-documentation';hover.hidden=true;problems.after(hover);
  const completions=document.createElement('div');completions.id='typstCompletions';completions.className='typst-completions';completions.setAttribute('role','listbox');completions.setAttribute('aria-label','Code suggestions');completions.hidden=true;document.querySelector('.code-area').append(completions);$('code').setAttribute('aria-autocomplete','list');
@@ -35,7 +35,7 @@ export function createTypstLive({api,state,setText,navigate,toast,sourceSelectio
  function closeCompletion(){completionRequest++;completions.hidden=true;choices=[];$('code').removeAttribute('aria-activedescendant');$('code').setAttribute('aria-expanded','false');}
  function stop(){
   ++generation;clearTimeout(timer);clearTimeout(pollTimer);clearTimeout(completionTimer);const old=session,oldProject=project;
-  session=null;project=null;starting=false;flight=null;dirty=false;lastState=null;lastJump=0;lastError='';unavailable='';sequence=0;sourceCache.clear();
+  session=null;project=null;starting=false;flight=null;dirty=false;lastState=null;lastAccepted='';lastJump=0;lastError='';unavailable='';sequence=0;sourceCache.clear();extraChanges.clear();
   frame.src='about:blank';frame.hidden=true;hover.hidden=true;problems.hidden=true;closeCompletion();render();
   if(old)closing=fetch('/api/projects/'+oldProject+'/typst/'+old,{method:'DELETE',headers:{'Content-Type':'application/json'},body:'{}',keepalive:true}).catch(()=>{});
   return closing;
@@ -54,7 +54,7 @@ export function createTypstLive({api,state,setText,navigate,toast,sourceSelectio
   finally{if(ticket===generation)starting=false;}
  }
  function accept(result){
-  lastState=result;const current=state(),items=[];
+  const signature=JSON.stringify(result);if(signature===lastAccepted)return;lastAccepted=signature;lastState=result;const current=state(),items=[];
   for(const [path,diagnostics] of Object.entries(result.diagnostics||{}))for(const diagnostic of diagnostics)items.push({path,...diagnostic});
   problems.replaceChildren();problems.hidden=!items.length;
   for(const item of items.slice(0,5)){const button=document.createElement('button');button.className='typst-diagnostic';button.textContent=item.path+':'+((item.range?.start?.line||0)+1)+' · '+item.message;button.addEventListener('click',()=>navigate(item.path,item.range).catch(error=>toast(error.message)));problems.append(button);}
@@ -62,11 +62,12 @@ export function createTypstLive({api,state,setText,navigate,toast,sourceSelectio
   if(current.project?.id===project)render();
  }
  async function poll(){
-  if(!active())return;const ticket=generation;
+  if(!active())return;if(document.hidden){pollTimer=setTimeout(poll,5000);return;}const ticket=generation;
   try{const result=await api(endpoint());if(ticket===generation)accept(result);}
   catch(error){if(ticket===generation){if([401,403,404,409,503].includes(error.status)){lastError=error.message;frame.src='about:blank';render();return;}$('buildStatus').textContent=error.message;}}
   if(ticket===generation)pollTimer=setTimeout(poll,600);
  }
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&active()){clearTimeout(pollTimer);poll();}});
  function changed(){
   if(active()&&state().project.main!==mainDocument){open().catch(report);return;}
   controls();closeCompletion();clearTimeout(completionTimer);
@@ -75,15 +76,20 @@ export function createTypstLive({api,state,setText,navigate,toast,sourceSelectio
   dirty=true;clearTimeout(timer);timer=setTimeout(()=>flush().catch(error=>report(error)),45);
  }
  function report(error){toast(error.message);}
+ function changeFile(path,content){if(!active()||!state().project.files.some(file=>file.path===path))return;extraChanges.set(path,content);dirty=true;clearTimeout(timer);timer=setTimeout(()=>flush().catch(report),45);}
+ async function queryFile(path,content,position){
+  if(!active()||!path.endsWith('.typ'))return null;const ticket=generation;changeFile(path,content);await flush();if(ticket!==generation)return null;
+  return (await api(endpoint(),'POST',{operation:'query',method:'completion',path,position})).result;
+ }
  async function flush(){
   if(flight){await flight;if(dirty)return flush();return;}
   if(!active()||!dirty)return;
   const ticket=generation,pid=project,sid=session;
   flight=(async()=>{
    while(dirty&&ticket===generation){
-    dirty=false;const current=state(),path=current.file?.path,text=current.text;if(current.project?.id!==pid||current.file?.content===null||!path)return;
-    const result=await api('/api/projects/'+pid+'/typst/'+sid,'POST',{operation:'change',path,content:text,sequence:++sequence});
-    if(ticket===generation)accept(result);
+    dirty=false;const current=state(),path=current.file?.path,text=current.text;if(current.project?.id!==pid)return;
+    const changes=new Map(extraChanges);extraChanges.clear();if(path&&current.file.content!==null)changes.set(path,text);
+    for(const [file,content] of changes){if(ticket!==generation)break;if(!state().project.files.some(item=>item.path===file))continue;const result=await api('/api/projects/'+pid+'/typst/'+sid,'POST',{operation:'change',path:file,content,sequence:++sequence});if(ticket===generation)accept(result);}
    }
   })();
   try{await flight;}finally{if(ticket===generation)flight=null;}
@@ -133,22 +139,7 @@ export function createTypstLive({api,state,setText,navigate,toast,sourceSelectio
   for(const edit of ranges)text=text.slice(0,edit.start)+edit.text+text.slice(edit.end);
   return text;
  }
- function expandSnippet(value){
-  let text='',stops=[];
-  for(let index=0;index<value.length;){
-   if(value[index]==='\\'&&/[\\$}]/.test(value[index+1]||'')){text+=value[index+1];index+=2;continue;}
-   const simple=value.slice(index).match(/^\$(\d+)/);
-   if(simple){stops.push({number:Number(simple[1]),start:text.length,end:text.length});index+=simple[0].length;continue;}
-   if(value.slice(index,index+2)==='${'){
-    let end=index+2,depth=1;
-    for(;end<value.length;end++){if(value[end]==='\\'){end++;continue;}if(value[end]==='{')depth++;if(value[end]==='}'&&!--depth)break;}
-    const body=value.slice(index+2,end),match=body.match(/^(\d+)(?::([\s\S]*)|\|([\s\S]*)\|)?$/);
-    if(depth===0&&match){const start=text.length,content=match[2]??match[3]?.split(/(?<!\\),/)[0]??'';text+=expandSnippet(content).text;stops.push({number:Number(match[1]),start,end:text.length});index=end+1;continue;}
-   }
-   text+=value[index++];
-  }
-  stops.sort((a,b)=>(a.number||Infinity)-(b.number||Infinity));return {text,selection:stops[0]||{start:text.length,end:text.length}};
- }
+
  function applyCompletion(){
   const item=choices[choice],current=state();if(!item||!completionSource||current.text!==completionSource.text||current.file?.path!==completionSource.path||sourceSelection().start!==completionSource.caret||sourceSelection().end!==completionSource.caret){closeCompletion();return;}
   const original=current.text,edit=item.textEdit,insert=edit?.newText??item.insertText??item.label;
@@ -193,5 +184,5 @@ export function createTypstLive({api,state,setText,navigate,toast,sourceSelectio
  // stays open. Release the worker only once the page actually leaves.
  window.addEventListener('pagehide',()=>{if(session)navigator.sendBeacon(endpoint(),new Blob([JSON.stringify({operation:'close'})],{type:'application/json'}));});
  window.addEventListener('pageshow',event=>{if(event.persisted&&state().project)open().catch(report);});
- return {open,stop,changed,flush,render,dismissCompletion:closeCompletion,get active(){return active();},get starting(){return starting;}};
+ return {open,stop,changed,changeFile,queryFile,flush,render,dismissCompletion:closeCompletion,get active(){return active();},get starting(){return starting;}};
 }

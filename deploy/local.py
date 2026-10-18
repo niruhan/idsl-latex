@@ -32,7 +32,7 @@ def environment():
     env = dict(os.environ)
     for key in ('COMPILER_URL', 'SETUP_TOKEN', 'TRUST_CLOUDFLARE', 'LATEX_ENGINE', 'HOST', 'PORT',
                 'APP_ORIGIN', 'DATA_DIR', 'TECTONIC_BIN', 'TYPST_BIN', 'LABTEX_TMPDIR',
-                'TYPST_PACKAGE_PATH', 'TYPST_PACKAGE_CACHE_PATH', 'TINYMIST_BIN'):
+                'TYPST_PACKAGE_PATH', 'TYPST_PACKAGE_CACHE_PATH', 'TINYMIST_BIN', 'LABTEX_LOCAL_MANAGED_ROOT'):
         env.pop(key, None)
     env.update(LATEX_ENGINE='tectonic', TECTONIC_BIN=str(STATE / 'bin/tectonic'),
                TYPST_BIN=str(STATE / 'bin/typst'), TINYMIST_BIN=str(STATE / 'bin/tinymist'), LABTEX_COMPILER_HOME=str(STATE / 'compiler-home'),
@@ -130,7 +130,7 @@ def serve(port):
         token_path.write_text(secrets.token_urlsafe(32) + '\n')
         token_path.chmod(0o600)
     env.update(SETUP_TOKEN=token_path.read_text().strip(), DATA_DIR=str(ROOT / 'data'),
-               APP_ORIGIN=f'http://127.0.0.1:{port}')
+               APP_ORIGIN=f'http://127.0.0.1:{port}',LABTEX_LOCAL_MANAGED_ROOT=str(ROOT))
     os.environ.clear()
     os.environ.update(env)
     (STATE / 'local.pid').write_text(str(os.getpid()))

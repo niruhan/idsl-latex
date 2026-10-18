@@ -72,7 +72,12 @@ def unpack_zip(raw, include_directories=False):
 def pack_zip(files, directories=()):
     out = io.BytesIO()
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
-        for path, data in files.items(): z.writestr(safe_path(path), data)
+        compressed={'.png','.apng','.jpg','.jpeg','.gif','.webp','.avif','.ico','.zip','.gz','.woff2'}
+        for path, data in files.items():
+            # Recompressing already-compressed assets wastes CPU in exports,
+            # checkpoints and collaboration baselines without shrinking them.
+            kind=zipfile.ZIP_STORED if len(data)>1024 and PurePosixPath(path).suffix.lower() in compressed else zipfile.ZIP_DEFLATED
+            z.writestr(safe_path(path),data,compress_type=kind)
         for path in sorted(directories): z.writestr(safe_path(path)+'/', b'')
     return out.getvalue()
 

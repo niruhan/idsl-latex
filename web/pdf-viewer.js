@@ -38,13 +38,13 @@ async function render(state){
   }
   state.rendered=ticket;state.element.dataset.rendered='true';
  }catch(error){if(valid()&&error.name!=='RenderingCancelledException'&&error.name!=='AbortException'){state.rendered=ticket;throw error;}}
- finally{state.running=false;state.task=null;if(state.visible&&state.rendered!==epoch)enqueue(state);}
+ finally{state.running=false;state.task=null;if(!state.visible){state.pdfPage?.cleanup();state.pdfPage=null;state.layer=null;state.baselines=null;state.viewport=null;}if(state.visible&&state.rendered!==epoch)enqueue(state);}
 }
 async function follow(destination){
  const dest=typeof destination==='string'?await documentPdf.getDestination(destination):destination;if(!Array.isArray(dest))return;
  const page=typeof dest[0]==='number'?dest[0]:await documentPdf.getPageIndex(dest[0]);states[page]?.element.scrollIntoView({block:'start'});
 }
-function release(state){state.generation++;state.task?.cancel();state.layer?.cancel();state.element.querySelectorAll('canvas').forEach(canvas=>{canvas.width=canvas.height=1;});state.element.replaceChildren();state.element.removeAttribute('data-rendered');state.rendered=-1;}
+function release(state){state.generation++;state.task?.cancel();state.layer?.cancel();state.element.querySelectorAll('canvas').forEach(canvas=>{canvas.width=canvas.height=1;});state.element.replaceChildren();state.layer=null;state.baselines=null;if(!state.running){state.pdfPage?.cleanup();state.pdfPage=null;state.viewport=null;}state.element.removeAttribute('data-rendered');state.rendered=-1;}
 function rescale(){epoch++;for(const state of states){release(state);size(state);if(state.visible)enqueue(state);}}
 function adjust(value){zoom=Math.max(.5,Math.min(3,value));rescale();}
 $('zoomIn').addEventListener('click',()=>adjust(zoom*1.2));$('zoomOut').addEventListener('click',()=>adjust(zoom/1.2));$('zoomFit').addEventListener('click',()=>adjust(1));

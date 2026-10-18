@@ -16,15 +16,20 @@ All screenshots use a temporary database, fictional demo accounts, and starter d
 
 ## Features
 
-- **Project explorer:** organize projects into nested folders; use **⋯** to download a project's source ZIP, duplicate, rename, move, or delete it, or drag it onto a folder. Deleted projects stay in **Trash** for 30 days. Cards/list, search, sorting, and format/ownership filters help you find documents. **My projects** saves and opens the root projects view.
-- **Focused workspace:** full-height source and preview, foldable sections/slides/code blocks, automatic bracket/quote pairing, smart Enter indentation, Tab/Shift+Tab for selected lines, a collapsible file explorer (**Ctrl/Cmd+B**), and a compact **Project ⋯** menu for secondary controls.
-- **LaTeX + Typst:** source editing, multi-file projects with collapsible folders, image previews (including SVG), right-click actions, figures, and bibliographies. Select multiple files with Cmd/Ctrl-click or Shift-click to delete them together; folders can be deleted with their contents. Right-click a folder or empty space to create files, persistent empty folders, or upload assets there; click the editor’s project title to rename it in place.
+- **Project explorer:** organize projects into nested folders; use **⋯** to download a project's source ZIP, duplicate, rename, move, or delete it, or drag it onto a folder. Deleted projects stay in **Trash** for 30 days. First-page previews from the last successful PDF, full names on hover/focus, cards/list, search, sorting, and format/ownership filters help you find documents. **My projects** saves and opens the root projects view.
+- **Focused workspace:** full-height source and preview, foldable sections/slides/code blocks, automatic bracket/quote pairing, smart Enter indentation, Tab/Shift+Tab for selected lines, a resizable, collapsible file explorer (**Ctrl/Cmd+B**), and a compact **Project ⋯** menu for secondary controls.
+- **LaTeX + Typst:** source editing, multi-file projects with collapsible folders, image thumbnails and previews (including SVG), right-click actions, figures, and bibliographies. Select multiple files with Cmd/Ctrl-click or Shift-click to delete them together; folders can be deleted with their contents. Right-click a folder or empty space to create files, persistent empty folders, or upload assets there; click the editor’s project title to rename it in place.
 - **Live Typst on Mac:** Tinymist keeps an incremental compiler running, streams preview updates while typing, and provides autocomplete, documentation, go-to-definition, formatting, diagnostics, and source/preview navigation.
 - **Code autocomplete:** suggestions appear while typing in LaTeX and Typst. Use **Ctrl+Space**, arrows, and **Tab/Enter** to insert commands/snippets; LaTeX also completes environments, project citation keys, labels, and file paths. Typst uses Tinymist when connected and local suggestions otherwise.
+- **Navigation + editing:** a **Ctrl/Cmd+F** file search/replace footer, a separate **Search project** panel with regex (**Ctrl/Cmd+Shift+F**), section/slide outlines, remembered file tabs, and editable split source panes with independent scrolling and autosave.
+- **Bibliography manager:** browse/edit BibTeX entries, import DOI metadata from Crossref/DataCite after review, and find missing citation/reference keys.
 - **PDF preview + export:** click LaTeX or Typst preview text to open its source; automatic LaTeX builds, clickable errors, project-named PDF/ZIP downloads, and an independent dark-preview toggle.
 - **Sharing:** invite coauthors to individual projects with editor or view-only access.
 - **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.
 - **GitHub backups:** keep all projects in named folders in one repository or use a separate repository per document; saved tokens, a one-click global backup button beside the explorer theme toggle, and optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
+- **GitHub restore + pull:** inspect a backup or older commit, review file diffs, and apply selected changes or restore an independent project. Recovery source ZIPs preserve the version before bulk edits.
+- **Collaborate between local apps:** connect a GitHub backup, join it on another machine, and review three-way merges before syncing. Conflicting text or binary versions require a choice. [Two-user setup →](docs/LOCAL.md#collaborate-between-local-installations)
+- **App updates:** daily release checks, an account-menu notification, and manual check/install controls. Installation and restart always require your approval. [Details →](docs/LOCAL.md#app-updates)
 - **Import/export:** import project ZIPs (including Overleaf exports), upload assets, and download complete source ZIPs.
 - **Themes:** choose IDSL Forest, Western Purple, Nord, GitHub, or Solarized under **Account → Themes & appearance**; switch light/dark with one click on the sun/moon button.
 - **Ready-to-use templates:** Western slides and NeurIPS are featured; **More templates** offers a Typst introduction, classic LaTeX article, Western thesis scaffold, coursework, Beamer slides, and academic CV.
@@ -65,7 +70,7 @@ Shared hosting requires x86_64 Linux, Python 3.10+, systemd, cgroup v2, and Bubb
 | Shared Linux installation | [Linux setup](docs/INSTALL_LINUX.md) |
 | SSH access, HTTPS, reverse proxies | [Hosting](docs/HOSTING.md) |
 | Database backups, updates, account recovery | [Operations](docs/OPERATIONS.md) |
-| Tests and screenshot generation | [Development](docs/DEVELOPMENT.md) |
+| Tests, screenshots, performance and release checks | [Development](docs/DEVELOPMENT.md) · [Performance](docs/PERFORMANCE.md) |
 | Privacy and isolation boundaries | [Security](SECURITY.md) |
 
 Projects/accounts stay in ignored `data/`; compilers, caches, and setup tokens stay in ignored `.local/`. Keep those directories private when committing or sharing source.

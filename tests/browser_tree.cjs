@@ -30,7 +30,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const first=await fixture('Folder navigation fixture'),second=await fixture('Independent folder preferences');
   const before=await api('/api/projects/'+first);
   await open(first);
-  assert.equal(await page.locator('#fileTree > button.tree-file').first().getAttribute('title'),'main.typ');
+  assert.equal(await page.locator('#projectRootContents > button.tree-file').first().getAttribute('title'),'main.typ');
   const svgBefore=await api('/api/projects/'+first+'/file?path=images/safe-image.svg'),external=[];page.on('request',request=>{if(request.url().includes('example.test/preview-probe'))external.push(request.url());});
   await file('images/safe-image.svg').click();await page.locator('#binaryPreview img').waitFor();await page.waitForFunction(()=>{const image=document.querySelector('#binaryPreview img');return image.complete&&image.naturalWidth===160;});
   assert.equal(await page.locator('#sourceEditor').isHidden(),true);assert.equal(await page.locator('#assetPreviewTab').textContent(),'Preview');assert.equal(await page.evaluate(()=>Boolean(window.svgPreviewExecuted)),false);assert.equal(await page.locator('#binaryPreview svg,#binaryPreview script,#binaryPreview iframe').count(),0);assert.deepEqual(external,[]);

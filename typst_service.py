@@ -438,4 +438,5 @@ class TypstService:
 
     def close(self):
         self.stopped.set()
+        atexit.unregister(self.close)
         self.discard()

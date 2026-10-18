@@ -2,6 +2,10 @@
 
 The runtime is Python's standard library plus plain browser JavaScript. There is no production npm/pip dependency tree. A vendored, checksum-verified Mozilla PDF.js 6.4.299 bundle renders LaTeX PDFs locally; its license and release/file hashes are in `web/vendor/pdfjs/`. On Mac, the verified Tinymist executable provides a persistent compiler, LSP, and bundled live renderer. Linux compiler and tunnel downloads are pinned in `deploy/dependencies.json`; Mac compilers are pinned in `deploy/local-dependencies.json`. See [local development](LOCAL.md) for the Mac runner and isolated browser suite.
 
+## Lean development and release review
+
+Follow [AGENTS.md](../AGENTS.md) for every change. Before each release, perform the full runtime audit and measured checks in [PERFORMANCE.md](PERFORMANCE.md). `python3 tests/run_browser.py --performance` uses fictional large-project fixtures and enforces idle/network/rendering budgets; the GitHub workflow runs it independently of native compiler tests.
+
 ## Automated tests
 
 After setup:
@@ -17,6 +21,24 @@ The installer also checks namespaces and compiles a real sample through the offl
 CI runs the backend/installer tests with a distribution TeX Live installation. Native sandbox tests skip there because the production bundle is not configured. Full native installation, nested compilation, and browser tests must also pass on a disposable Linux installation before a release. Mac validation does not establish that Linux sandbox installation is working.
 
 ## Browser regression test
+
+`python3 tests/run_browser.py --source-search` checks current-file scope without project-source requests, highlights, wrapped keyboard navigation, regex/literal replacement, undo, unsaved drafts, folding, split panes, the separate project-search panel and mobile layout.
+
+`python3 tests/run_browser.py --workspace-tools` covers regex replacement and recovery, lexical outlines, tab/cursor persistence, linked and separate split buffers, smart keys/completions, bibliography CRUD/DOI previews/missing keys, selective GitHub diff review and independent restore, and mobile bounds. DOI/GitHub UI tests use mocked registry responses and fictional local projects. `tests/test_project_tools.py` verifies real HTTP permissions, atomic rollback, checkpoints, revision conflicts, immutable Git blob verification, scope isolation, unsafe paths and DOI registry validation. The native Tinymist suite verifies split-pane memory edits and completions through the existing live worker.
+
+`project_changes.py` applies revision-checked batches inside the caller's SQLite transaction, preserves file history, and creates bounded ZIP checkpoints. `github_restore.py` reads immutable Git trees/blobs and source diffs; server-owned review plans are account/project scoped, expire in 15 minutes, and use a bounded 128 MB memory cache. Apply never trusts source content or revisions supplied by the browser. The selected snapshot is already pinned; concurrent local writes invalidate the complete plan. GitHub restore performs no remote mutations. `doi_metadata.py` contacts only fixed registry API hosts with redirects disabled and a 256 KiB response limit.
+
+`python3 tests/run_browser.py --collaboration` launches two independent HTTP apps/databases/accounts against a versioned in-memory GitHub API. It checks connecting/joining, each installation's stored credential, reloads, disjoint merges, explicit manual conflicts, stale-head rejection and draft recovery, and mobile layout. `test_github_collaboration.py` also checks adds/deletes/main changes, binary version selection/downloads, root-repository exclusion of unlisted files, collision protection, expiry, ownership and concurrent local/remote writes. No real repository or Keychain entry is used.
+
+`github_collaboration.py` stores each link and compressed baseline in private SQLite. Reviews bind immutable base/local/remote source to the account, project, local revision and Git commit for 15 minutes, with at most four reviews and a 192 MiB aggregate content budget. Source merges use conservative line-based three-way comparison; binary/large/overlapping edits require explicit resolution. Sync validates the local transaction before network writes, publishes only manifest-owned paths with a non-forced ref update, then rechecks local revision/connection before applying atomically with a recovery checkpoint. A local edit during upload retains the draft and old baseline for a fresh review even if the remote commit succeeded. The original remote project ID stays stable across independent local IDs. Collaboration-marked manifests reject ordinary snapshot overwrites; bulk backups skip linked projects.
+
+`python3 tests/run_browser.py --file-explorer` checks the named/collapsible root drop target, context-menu destinations, image thumbnails, keyboard/pointer column resizing, remembered width, cancel/reset, draft preservation and responsive layout. Native `<img>` thumbnails use an authenticated, revision-checked `/image` endpoint with no-store and a sandbox CSP; SVG content is never injected into the DOM. Only image suffixes are accepted, members may read, and revoked/trashed projects are rejected. Existing image elements are reused across polling renders, avoiding repeat downloads of unchanged files. `test_file_images.py` checks bytes, response policy, versions and permissions. The browser supplies decoding, with a generic image fallback for unsupported formats.
+
+`python3 tests/run_browser.py --explorer-previews` compiles fictional LaTeX/Typst documents, renders actual PDF.js covers, checks reload/failed-build retention and cover invalidation, and verifies full-name hover/focus in grid/list and mobile views. `test_project_previews.py` checks migration from saved builds, project membership, version checks and deletion cleanup.
+
+`web/project-covers.js` lazily renders only page one, with two concurrent PDF workers and a bounded in-memory image cache. The authenticated `preview.pdf` route reads one retained successful PDF per project from `project_previews`; failed builds preserve it. No thumbnail or project content is written into public source files.
+
+`web/project-worker.js` runs regex and source analysis off the UI thread with a four-second deadline. `workspace-tabs.js` owns split drafts/undo/folding and reuses the primary buffer when both panes show the same file. `source-search.js` searches only the active source draft, preserves full-source offsets through folding, and applies undoable local replacements. `workspace-tools.js` supplies the separate project-content search panel beside the filename-only file filter, outline navigation and review dialogs. Source saves on actual page exit start independently for both buffers; normal app navigation waits for both. Bulk source changes reconnect the current user's Typst session to clear obsolete memory overlays.
 
 On Mac, after compiler setup, run the editor browser suites against a temporary database:
 
@@ -121,3 +143,23 @@ Keep the source archive checksum with the release. Verify the public GitHub tree
 `test_trash.py` checks owner-only retention, access blocking, restore, expired-project cleanup, source/history/backup retention, permanent deletion, folder fallback and quotas. `browser_trash.cjs` checks editor deletion after the final autosave, persistent restore, permanent-delete cancellation and mobile layout. Browser suites purge only their deleted fictional fixtures between scripts.
 
 `test_project_copy.py` checks same-folder source copies, assets and selected main document, independent ownership/content, unique bounded names, quota/Trash/authentication checks and per-account folder isolation. `browser_project_copy.cjs` checks grid/list duplication, autosave and opening the root projects view through **My projects** after reload, direct links and global filters, with one root breadcrumb and mobile layout.
+
+## Update-enabled release packages
+
+The updater follows stable GitHub releases, not every push to `main`. Before publishing, complete the performance/privacy review in [PERFORMANCE.md](PERFORMANCE.md), set the root `VERSION` to the intended stable version, and commit/tag that exact reviewed source. Then build from the immutable tag:
+
+```sh
+python3 scripts/build_release.py v0.4.0
+```
+
+The script verifies `VERSION`, packages only files in that Git commit, rejects private/runtime paths and symlinks, and writes `dist/idsl-latex-v0.4.0.zip` plus `dist/idsl-latex-v0.4.0-SHA256SUMS.txt`. The ZIP embeds an `idsl-release.json` with repository, version, commit and individual source hashes. Do not commit the generated manifest or `dist/`.
+
+Attach both files to the matching GitHub release. Confirm the ZIP's `digest` in the public release API matches its SHA-256, then publish it as a stable release. A tag or GitHub-generated source archive alone does not provide the verified package needed by the in-app installer. Preview/development versions do not replace stable installs. Existing old ZIPs without the manifest remain manual upgrades.
+
+The **Release update packages** workflow also builds and attaches these files when a stable release is published. It checks out that exact tag, runs source hygiene, and refuses to replace an existing asset with different bytes. Upload credentials are available only to the attachment step. If publishing through GitHub's UI, wait for this workflow to finish before asking users to install; failed packaging leaves installation disabled. The pre-release performance/privacy review still applies.
+
+`deploy/updates.py` uses one sleeping release-check thread only in managed local Mac mode. Metadata checks are daily/cached, manual checks are throttled for one minute, response/download/extraction sizes are bounded, redirects stay on fixed GitHub hosts, and no backup credential or installation fingerprint enters requests. No source is downloaded or changed until the administrator approves a specific version/digest.
+
+Installation runs in a copied helper under private `.local/updates/` so it survives replacing app source. It refuses changed code, pins Git fast-forward/tag/package identity, verifies the ZIP and all files before stopping, waits for active compile/backup jobs, backs up SQLite using the backup API, preserves installation state, validates startup under a write barrier, and rolls back failed updates. Archive application only replaces manifest-owned files. One private rollback snapshot is retained; unsuccessful recovery requires an explicit helper invocation instead of another install.
+
+`tests/test_updates.py` uses fake releases and temporary archive/Git installations to check explicit approval, throttling, checksums, paths, permissions, data/settings retention and failure recovery. `tests/test_update_restart.py` uses real local launcher processes on Mac for a successful update and a failed startup/database migration with rollback. It never touches the personal installation or real GitHub. `python3 tests/run_browser.py --updates` checks the badge, manual check, opt-out, safe release notes, save-before-install, exact consent payload, progress/reload and dirty-code blocking using mocked update requests. Browser tooling remains a test-only dependency.

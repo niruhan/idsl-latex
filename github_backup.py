@@ -159,6 +159,8 @@ def backup_snapshot(client, target, project, files, shared=True):
             raise Problem('Backup manifest is invalid. Choose a fresh backup destination.')
     previous = set()
     if manifest:
+        if manifest.get('collaboration') == 1:
+            raise Problem('This is a shared collaboration project. Use Review & sync to merge changes safely.',409)
         try:
             names = manifest['files']
             if manifest.get('version') != 1 or not isinstance(names, list) or len(names) > MAX_FILES or MANIFEST in names:

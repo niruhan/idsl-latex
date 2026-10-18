@@ -87,3 +87,20 @@ export function localCompletions({path,text,caret,files=[],sources=[],manual=fal
   return {label:item.label,insertTextFormat:item.snippet&&!preserveArguments?2:1,textEdit:{range,newText:value}};
  });
 }
+
+export function expandSnippet(value){
+  let text='',stops=[];
+  for(let index=0;index<value.length;){
+   if(value[index]==='\\'&&/[\\$}]/.test(value[index+1]||'')){text+=value[index+1];index+=2;continue;}
+   const simple=value.slice(index).match(/^\$(\d+)/);
+   if(simple){stops.push({number:Number(simple[1]),start:text.length,end:text.length});index+=simple[0].length;continue;}
+   if(value.slice(index,index+2)==='${'){
+    let end=index+2,depth=1;
+    for(;end<value.length;end++){if(value[end]==='\\'){end++;continue;}if(value[end]==='{')depth++;if(value[end]==='}'&&!--depth)break;}
+    const body=value.slice(index+2,end),match=body.match(/^(\d+)(?::([\s\S]*)|\|([\s\S]*)\|)?$/);
+    if(depth===0&&match){const start=text.length,content=match[2]??match[3]?.split(/(?<!\\),/)[0]??'';text+=expandSnippet(content).text;stops.push({number:Number(match[1]),start,end:text.length});index=end+1;continue;}
+   }
+   text+=value[index++];
+  }
+  stops.sort((a,b)=>(a.number||Infinity)-(b.number||Infinity));return {text,selection:stops[0]||{start:text.length,end:text.length}};
+ }

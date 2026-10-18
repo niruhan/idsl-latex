@@ -12,7 +12,9 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
  const get=async route=>(await(await context.request.get(origin+route)).json());
  const waitPalette=async id=>page.waitForFunction(id=>document.documentElement.dataset.palette===id,id);
  const snapshot=async name=>{await page.locator('#toast').waitFor({state:'hidden'});await page.screenshot({path:path.join(output,name+'.png'),fullPage:true,animations:'disabled'});};
- async function contrast(selector){return page.locator(selector).first().evaluate(el=>{
+ async function contrast(selector){return page.locator(selector).first().evaluate(async el=>{
+  // Theme selection starts 150 ms color transitions; assess their settled colors.
+  await Promise.allSettled(el.getAnimations().map(animation=>animation.finished));
   const rgb=value=>(value.match(/[\d.]+/g)||[]).slice(0,3).map(Number).map(value=>{value/=255;return value<=.04045?value/12.92:((value+.055)/1.055)**2.4;});
   const luminance=value=>{const c=rgb(value);return .2126*c[0]+.7152*c[1]+.0722*c[2];};
   const style=getComputedStyle(el),a=luminance(style.color),b=luminance(style.backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);

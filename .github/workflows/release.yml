@@ -1,0 +1,40 @@
+name: Release update packages
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  package:
+    if: github.repository == 'niruhan/idsl-latex' && !github.event.release.prerelease
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - name: Check public source and build immutable package
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 scripts/check_release.py
+          python3 scripts/build_release.py "$RELEASE_TAG"
+      - name: Attach package and checksums without replacing published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,subprocess
+          repo=os.environ['GITHUB_REPOSITORY'];tag=os.environ['RELEASE_TAG']
+          release=json.loads(subprocess.check_output(['gh','api',f'repos/{repo}/releases/tags/{tag}']))
+          assets={asset['name']:asset for asset in release['assets']}
+          for path in sorted(pathlib.Path('dist').iterdir()):
+              expected='sha256:'+hashlib.sha256(path.read_bytes()).hexdigest()
+              if path.name in assets:
+                  if assets[path.name].get('digest')!=expected:raise SystemExit('Existing release asset differs; published packages must remain immutable.')
+              else:subprocess.run(['gh','release','upload',tag,str(path),'--repo',repo],check=True)
+          PY

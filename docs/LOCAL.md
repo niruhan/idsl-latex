@@ -50,6 +50,8 @@ Click **New folder** to create a directory in the explorer. Open it to create su
 
 Use **⋯ → Move to folder** on a project card or list row to choose its destination, or drag the project onto a folder card, sidebar folder, or breadcrumb. Choose **All projects (root)** to move it out. New projects and ZIP imports start in the folder you currently have open. **Folder settings** lets you rename a folder, change its parent, or delete it once empty.
 
+Project tiles show the first page of the last successfully compiled PDF for both LaTeX and Typst. Compile or export a Typst PDF once to create its cover; later failed builds keep the previous cover. Existing saved PDFs are picked up automatically. Covers load as tiles enter view and stay private to project members. Hover a truncated title or focus its tile with the keyboard to read the full name.
+
 The root shows folders and projects that have not been filed. Search at the root finds projects in every folder; inside a folder it includes that folder's descendants. **My projects**, **Shared with me**, **Typst**, and **LaTeX** filters search across your whole collection.
 
 Use **Up one level** or **All projects** below the templates to leave a folder. Drag projects or folders onto another folder to move them; dragging onto **All projects** moves them to the root. Folder moves include their descendants and refuse cycles.
@@ -109,13 +111,29 @@ Click a folder name or its arrow under **Project files** to collapse or expand i
 
 Right-click empty space in **Project files** and choose **New folder…** to create a root folder, or right-click a folder name/its contents to create one inside it. Slashes create nested folders. Empty folders persist across reloads and can receive uploads or dragged files; they also survive project duplication and source ZIP export/import. They are stored in SQLite alongside the project, without placeholder files. Use the folder’s **Delete folder…** action to remove it, including when empty.
 
-Click an image in **Project files** to preview it in the left pane. SVGs and common raster images open in **Preview**; SVGs also offer **Project ⋯ → Source** for editing and **Preview** to return to the image. Selecting a document returns to its source.
+Image files show their actual thumbnail in **Project files**. Click one to preview it in the left pane. SVG, PNG/APNG, JPEG, GIF, WebP, AVIF, BMP and ICO are supported; TIFF/HEIC/HEIF display when the browser can decode them, with an image icon fallback for unsupported or broken files. Images keep their original bytes. SVGs and common raster images open in **Preview**; SVGs also offer **Project ⋯ → Source** for editing and **Preview** to return to the image. Selecting a document returns to its source.
 
-The editor uses one compact top bar with no pane headers or footers. Click the panel icon at the top-right of the file explorer, or press **Ctrl/Cmd+B** to hide or show Project files; the choice is remembered in this browser, and a slim rail keeps the reopen button accessible. On phones, files open in a dismissible drawer. **Project ⋯** keeps sharing, source ZIP download, main-document selection, build logs, auto-compile, help, and document details together. **GitHub backup** and the independent **Dark preview** button sit beside the theme toggle. Source stays in the left pane. LaTeX uses the PDF preview on the right; Typst uses live preview. Save with **Ctrl/Cmd+S**, or rely on autosave.
+The editor uses one compact top bar; search and replace opens a footer only when needed. Click the panel icon at the top-right of the file explorer, or press **Ctrl/Cmd+B** to hide or show Project files; the choice is remembered in this browser, and a slim rail keeps the reopen button accessible. Drag the right edge of the files column to adjust its width; it is remembered across sessions and survives hiding/reopening. Focus the divider and use arrows (Shift for larger steps), Home or End; double-click to restore the default. On phones, files open in a dismissible drawer. **Project ⋯** keeps sharing, source ZIP download, main-document selection, build logs, auto-compile, help, and document details together. **GitHub backup** and the independent **Dark preview** button sit beside the theme toggle. Source stays in the left pane. LaTeX uses the PDF preview on the right; Typst uses live preview. Save with **Ctrl/Cmd+S**, or rely on autosave.
 
 Typst projects may use local imports, figures, bibliography files, fonts available on your Mac, and packages from Typst Universe.
 
-Drag files or directories onto a folder in the editor’s file tree, or onto **Project root**. Moves preserve bytes and revision history and update the main-document path. They refuse overwrites and folder merges. Update imports and image references to the old paths yourself. Source ZIP and PDF downloads use the project name.
+The file tree starts with a collapsible root folder named after the project. Drag files or directories onto that root folder to move them out, or onto a subfolder to move them inside it. Right-click the root or a folder to create/upload there. Moves preserve bytes and revision history and update the main-document path. They refuse overwrites and folder merges. Update imports and image references to the old paths yourself. Source ZIP and PDF downloads use the project name.
+
+### Search, outline, tabs and split source
+
+Press **Ctrl+F** or **Cmd+F** to find within the active file in a small source-editor footer. It searches your current draft, including unsaved edits. Selected text pre-fills the query; matches highlight as you type. **Enter / Shift+Enter**, **F3 / Shift+F3**, or **Ctrl/Cmd+G / Ctrl/Cmd+Shift+G** move between results and wrap at the end. **Escape** closes the footer and returns to the source. **Tab** from Find moves to Replace. **Enter** in Replace changes one match; **Replace all** changes only this file. Both actions support normal undo/autosave. Regex, case and whole-word options are available; **Alt+R/C/W** toggle them while the footer has focus. **Ctrl+H** or **Ctrl/Cmd+Alt+F** focuses Replace.
+
+**Find a file…** filters filenames only. Click the separate **Search project** button below it, or press **Ctrl/Cmd+Shift+F**, to open the project-content search panel with its own query. Close that panel with **×**, Escape in its query, or the **Files** tab to return to the file tree; the filename filter is preserved. Global results stay in that column and open the matching source when clicked. Enable **Regex**, case sensitivity, or whole words; use comma-separated file patterns such as `*.tex, *.bib` or `sections/*.typ` to narrow the scope. Regex uses JavaScript syntax with multiline anchors; replacement supports `$1`, `$2`, `$&`, and named captures. Literal mode inserts replacement text literally. Global **Replace all…** lets you select affected files before one atomic save. A concurrent project change rejects the entire operation for a fresh review. Results show up to 3,000 matches; overly expensive expressions stop after four seconds in a separate worker.
+
+**Outline** shows headings and slides in the current document. Enable **All project files** for project-wide navigation. Click an entry to open its file, expand folded source, and move to that source location. The outline reads source syntax and excludes comments/raw code; headings generated entirely by macros may not appear.
+
+Opening files adds tabs above the source. Tabs remember the active file and open paths per account/project; cursor and scroll positions persist while the page is open. Close tabs with **×**. Click **Split source editor** beside the tabs or right-click a file → **Open in split**. Choose a file in the second pane, switch between stacked/side-by-side layouts, or close it. The panes can edit separate files or share the same file, with independent scrolling. Both support folding, pairing, indentation, autocomplete, undo and autosave; Typst changes in either pane update the same live preview. App navigation and exports flush both panes. Server conflicts retain drafts for comparison/download.
+
+### Bibliography manager
+
+Open **Project ⋯ → Bibliography…** to browse, search, edit, add, or remove BibTeX entries. Changes preserve unrelated entries and use revision checks. DOI lookup sends only the entered DOI to the fixed Crossref/DataCite registry APIs; review the returned BibTeX, choose an existing or new `.bib` file, then **Save entry**. Connect that bibliography in your document with `\bibliography`/`\addbibresource` or Typst's `#bibliography` as usual.
+
+**Missing references** links unresolved citation keys to their source locations and reports duplicate BibTeX keys. Typst checks also recognize project labels and top-level Hayagriva YAML keys; an unresolved `@key` may be a cross-reference or citation. Detection examines project source rather than expanding macros or running a bibliography processor. Viewers can browse and navigate but cannot change entries or import metadata.
 
 ### Tinymist live editing on Mac
 
@@ -171,6 +189,27 @@ The first snapshot refuses to overwrite overlapping files already in the destina
 
 To restore source, download the repository ZIP from GitHub. For the shared layout, ZIP the desired `projects/PROJECT NAME/` folder and import it through **My projects → Import ZIP**. For a separate repository, import its ZIP directly. Check the main document after import. SQLite backups are still needed to preserve accounts and local revision history.
 
+You can also use **Account → Restore from GitHub…** in the explorer, or **Project ⋯ → Pull changes from GitHub…** for the current owned project. Inspect the repository/branch, optionally enter an older commit's full SHA, and select a backup. Both shared project folders and separate-repository backups are supported. The app reads project manifests and includes valid source/assets in the selected backup folder; hidden repository administration files and other project-backup folders are excluded. GitHub **Contents: Read** is sufficient for restore; pushing backups still requires **Read and write**. Saved tokens are reused with the same credential-store protections as backup.
+
+**Review changes** pins one immutable commit. Select added/modified/deleted files and click a filename to inspect its diff before applying. Selected modifications replace complete files; merge any conflicting text manually before applying. Binary files show byte counts, and large text diffs show a clearly marked excerpt. Pull checks the local project revision again and applies all selected files atomically. Explorer restore creates an independent private project in the current explorer folder. Neither operation writes to GitHub or changes another project's backup settings.
+
+**Project ⋯ → Recovery checkpoints…** offers source ZIPs from before project-wide replacement, bibliography changes and GitHub pull. Up to five checkpoints are retained within a roughly 40 MB archive budget per project, always keeping the latest. Import a checkpoint ZIP as a separate project to inspect/recover it. Checkpoints follow the project's access and Trash retention rules. Review plans expire after 15 minutes or a server restart; inspect again to continue.
+
+## Collaborate between local installations
+
+Two people can edit independent local copies of one project and synchronize through a GitHub backup. Each keeps their own local account, compiler and saved GitHub token.
+
+1. **Owner:** back up the current project, then open **Project ⋯ → GitHub collaboration…**. Choose that matching backup and **Enable collaboration**. You can use a named project folder in a shared repository or a repository dedicated to this document.
+2. Grant the other person write access to the repository in GitHub. Copy the repository, branch and project-folder details from the collaboration dialog.
+3. **Second machine:** open **Account → Join GitHub project…**, enter those details and your own token, choose the collaboration-enabled backup, review its source, and **Join shared project**. This creates an independent local copy connected to the same remote project.
+4. **Both users:** edit and autosave normally. Click the GitHub button beside the theme toggle (or **Project ⋯ → Review & sync GitHub…**), then **Review & sync**. Inspect changes, resolve any conflicts, and **Sync reviewed changes**. Repeat on the other machine to receive the merged result.
+
+Fine-grained tokens need the selected repository and **Contents: Read and write**; Metadata read access is included. GitHub currently requires a classic token for outside/repository collaborators in some ownership arrangements. Use `repo` for private repositories, or `public_repo` for public-only access, if that applies. The dialogs link to both token generators and the [current GitHub token limitations](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). Each person uses their own token; repository access must already be granted. Repository permissions cover every project in that repo, so use a dedicated project repo when sharing only one document.
+
+This is reviewed Git synchronization. It checks for new commits once a minute while the project is open and visible; updates are applied only after review. Disjoint text edits merge automatically using the last shared baseline. Overlapping edits, competing additions, or delete/edit conflicts require **Keep my version**, **Use GitHub version**, or a manual text merge. Binary and large files offer version downloads and explicit selection. Added/deleted source, images and the main-document choice synchronize too. Applying incoming source creates a recovery source ZIP under **Project ⋯ → Recovery checkpoints…**. Empty folders and personal explorer organization stay local; unrelated repository files stay untouched.
+
+A changed GitHub branch or local draft rejects a stale review; save, review again, and resolve against the new versions. The dialog retains manual drafts on errors. Reviews expire after 15 minutes or a server restart. The connection and baseline remain in the private database across restarts. Ordinary project/bulk snapshot backups skip connected projects to avoid overwriting a collaborator; use **Review & sync** for them. Disconnect removes only this local connection and keeps source on both machines and GitHub. The remote collaboration marker stays in place for the other user; choose another backup destination for an independent snapshot.
+
 ## Browser validation
 
 Install Playwright outside this repository and use Node 20 or newer. `tests/run_browser.py` starts a disposable database and runs the project-home, project-folder, file-tree, theme/palette, starter-template, LaTeX, and Typst browser regressions; it never touches `data/` or writes to GitHub.
@@ -184,3 +223,27 @@ python3 tests/run_browser.py
 Set `CHROME_BIN` to an installed Chromium-based browser if Playwright's Chromium is unavailable. Screenshots/PDFs go into ignored `artifacts/`.
 
 Add `--live-typst` to run the native Tinymist browser checks, including incremental rendering, language features, and PDF export. The default suite checks Typst PDF export when live preview is unavailable.
+
+## App updates
+
+Open **Account → App updates…** in the explorer or editor. The app shows its installed version and commit, the latest stable release, and release notes. A dot on the account button and an **App update available…** menu item announce an available update.
+
+The local Mac launcher checks GitHub's public releases about once a day while running. **Check for updates** checks manually; repeated clicks reuse a one-minute cache to avoid rate limits. You can turn daily checks off. An app that is stopped does not run a separate updater service.
+
+**Install v… and restart** is the approval to download, verify and install that specific release. Checks and notifications never install code. The active editor and split pane save first; other open tabs are asked to save too. Browser drafts remain recoverable on save failures. Close conflicting tabs or resolve their drafts before proceeding. After installation, choose **Reload updated app**; reloading waits for a save.
+
+In-app installation supports clean Git clones of the official repository and official release ZIPs containing an update manifest. Local code changes, different Git origins, diverged Git history or missing package verification block installation rather than overwrite work. A generic **Code → Download ZIP** checkout can check releases but needs a one-time manual upgrade to an official release ZIP to enable installation. Already-installed older versions without these update controls likewise need one manual upgrade first.
+
+The updater uses public release metadata and GitHub's SHA-256 asset digest, verifies every packaged file and preserves `data/` and `.local/`. Git updates must fast-forward to the approved release tag, matching the package commit. Before changing source, it stops the app and creates a private database backup; pinned compiler changes are checked too. Startup is verified before writes are enabled. A failed startup rolls source and database back and restarts the previous version. One rollback backup is retained in ignored `.local/updates/rollback/`; it contains private project data and must not be shared.
+
+Update checks send no installation ID, local version/commit, source, project data or saved GitHub token. There is no registration server or telemetry. GitHub receives the ordinary public HTTPS request, including its network address and a fixed app user agent.
+
+Shared Linux deployments show version/check information but installation/restart remains the administrator's deployment workflow. They cannot be changed by the browser updater.
+
+If an update is interrupted and automatic recovery cannot complete, keep `.local/updates/` intact. The status message reports that manual recovery is needed. From the app directory, use the saved helper and the job ID shown in the local job file:
+
+```sh
+python3 .local/updates/worker.py --recover "$PWD" JOB_ID
+```
+
+This explicitly restores the retained source/database backup and starts the previous app. Recovery can refuse conflicting developer changes; retain your edits and the rollback folder before resolving them.

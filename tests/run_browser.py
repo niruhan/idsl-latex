@@ -29,7 +29,17 @@ def main():
     parser.add_argument('--file-actions',action='store_true',help='Run file selection, deletion, context menus, moves and editing regressions on a fresh database')
     parser.add_argument('--source-folding',action='store_true',help='Run LaTeX/Typst source folding and edit-preservation checks on a fresh database')
     parser.add_argument('--autocomplete',action='store_true',help='Run LaTeX/Typst automatic and manual code-completion checks on a fresh database')
+    parser.add_argument('--workspace-tools',action='store_true',help='Run project search, outline, tabs/split, bibliography and GitHub review checks on a fresh database')
+    parser.add_argument('--explorer-previews',action='store_true',help='Run first-page project covers and full-title hover/focus checks on a fresh database')
+    parser.add_argument('--source-search',action='store_true',help='Run in-file find/replace and integrated global file/content search checks on a fresh database')
+    parser.add_argument('--file-explorer',action='store_true',help='Run root-tree, thumbnail and file-column resize checks on disposable data')
+    parser.add_argument('--updates',action='store_true',help='Run consent-only app update controls with mocked public metadata')
+    parser.add_argument('--performance',action='store_true',help='Measure a large fictional project and assert idle/rendering efficiency')
+    parser.add_argument('--collaboration',action='store_true',help='Run two independent app installations sharing a simulated GitHub repository')
     args=parser.parse_args()
+    if args.collaboration:
+        subprocess.run([sys.executable,str(ROOT/'tests/run_collaboration_browser.py')],cwd=ROOT,check=True)
+        return
     scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_editor_layout.cjs', 'browser_latex_source.cjs', 'browser_source_folding.cjs', 'browser_completions.cjs', 'browser_undo.cjs', 'browser_autosave.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs', 'browser_tree.cjs', 'browser_project_folders.cjs', 'browser_project_copy.cjs', 'browser_templates_palettes.cjs', 'browser_project_actions.cjs', 'browser_library_layout.cjs', 'browser_file_selection.cjs', 'browser_file_actions.cjs', 'browser_file_creation.cjs', 'browser_trash.cjs', 'browser_drag_live.cjs')
     if args.live_typst:scripts=('browser_smoke.cjs','browser_tinymist.cjs','browser_completions.cjs')
     if args.latex_source:scripts=('browser_latex_source.cjs',)
@@ -39,6 +49,12 @@ def main():
     if args.file_actions:scripts=('browser_smoke.cjs','browser_file_selection.cjs','browser_file_actions.cjs','browser_file_creation.cjs','browser_tree.cjs','browser_drag_live.cjs','browser_undo.cjs','browser_autosave.cjs')
     if args.source_folding:scripts=('browser_source_folding.cjs',)
     if args.autocomplete:scripts=('browser_smoke.cjs','browser_completions.cjs')
+    if args.workspace_tools:scripts=('browser_workspace_tools.cjs',)
+    if args.explorer_previews:scripts=('browser_explorer_previews.cjs',)
+    if args.updates:scripts=('browser_smoke.cjs','browser_updates.cjs')
+    if args.performance:scripts=('browser_performance.cjs',)
+    if args.file_explorer:scripts=('browser_smoke.cjs','browser_editor_layout.cjs','browser_file_explorer.cjs','browser_tree.cjs','browser_file_creation.cjs','browser_drag_live.cjs')
+    if args.source_search:scripts=('browser_source_search.cjs',)
     # The full run keeps completion fixtures in their own disposable server so
     # repeated demo sign-ins do not exhaust the production login rate limiter.
     full_run=not any(vars(args).values())
@@ -69,7 +85,8 @@ def main():
         finally:
             server.terminate()
             server.wait(timeout=10)
-    if full_run:subprocess.run([sys.executable,str(Path(__file__).resolve()),'--autocomplete'],cwd=ROOT,check=True)
+    if full_run:
+        for suite in ('--autocomplete','--workspace-tools','--explorer-previews','--source-search','--collaboration','--file-explorer','--performance','--updates'):subprocess.run([sys.executable,str(Path(__file__).resolve()),suite],cwd=ROOT,check=True)
 
 
 if __name__ == '__main__': main()

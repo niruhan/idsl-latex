@@ -1,0 +1,36 @@
+/* Named project root, adjustable file column and private image thumbnails. */
+const assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+(async()=>{
+ const origin=process.env.TEST_ORIGIN,browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_BIN}),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ async function api(path,method='GET',data){const response=await context.request.fetch(origin+path,{method,headers:{Origin:origin},data});assert.ok(response.ok(),await response.text());return response.json();}
+ async function ready(){await page.waitForFunction(()=>!document.querySelector('#workspace').hidden&&!document.querySelector('#workspace').inert);}
+ const width=async()=>Math.round((await page.locator('#filesPanel').boundingBox()).width);
+ try{
+  await page.goto(origin);await page.locator('input[name=email]').fill('browser-owner@example.test');await page.locator('input[name=password]').fill('browser-test-password-only');await page.locator('#authSubmit').click();await page.locator('#projectHome').waitFor({state:'visible'});
+  const id=(await api('/api/projects','POST',{name:'Image thumbnail example',format:'typst',template:false})).id,base='/api/projects/'+id;
+  const raster=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=12;canvas.height=8;const ctx=canvas.getContext('2d');ctx.fillStyle='#20797b';ctx.fillRect(0,0,12,8);return Object.fromEntries(['png','jpeg','webp'].map(type=>[type,canvas.toDataURL('image/'+type).split(',')[1]]));});
+  const svg='<svg xmlns="http://www.w3.org/2000/svg" width="32" height="20" onload="window.thumbnailScriptRan=true"><rect width="32" height="20" fill="#20797b"/><script>window.thumbnailScriptRan=true</script><image href="https://example.test/thumbnail-probe.png"/></svg>';
+  const fixtures={'images/drawing.SVG':{content:svg},'images/figure.png':{base64:raster.png},'images/photo.jpg':{base64:raster.jpeg},'images/photo.jpeg':{base64:raster.jpeg},'images/figure.webp':{base64:raster.webp},'images/pixel.gif':{base64:'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='},'images/broken.avif':{content:'Invalid image fixture'}};
+  for(const [path,value] of Object.entries(fixtures))await api(base+'/file','PUT',{path,revision:0,...value});
+  const probes=[];page.on('request',request=>{if(request.url().includes('example.test/thumbnail-probe'))probes.push(request.url());});await page.goto(origin+'/#project='+id);await ready();
+  assert.equal(await page.locator('#fileRootDrop .filename').textContent(),'Image thumbnail example');
+  await page.waitForFunction(()=>[...document.querySelectorAll('.file-thumbnail')].filter(image=>!image.src.includes('broken.avif')).every(image=>image.complete&&image.naturalWidth>0));
+  assert.equal(await page.locator('.file-thumbnail').count(),Object.keys(fixtures).length);assert.equal(await page.locator('.tree-file[title="images/drawing.SVG"] .file-icon').count(),0);assert.equal(await page.locator('.tree-file[title="main.typ"] .file-icon').textContent(),'TYP');
+  assert.equal(await page.evaluate(()=>Boolean(window.thumbnailScriptRan)),false);assert.deepEqual(probes,[]);assert.equal(await page.locator('#fileTree svg,#fileTree script,#fileTree iframe').count(),0);
+  await page.waitForFunction(()=>document.querySelector('.tree-file[title="images/broken.avif"] .file-image-icon').classList.contains('image-unavailable'));
+  const original=await page.locator('#code').inputValue(),draft=original+'\n// Preserve draft while resizing.\n';await page.locator('#code').fill(draft);await page.locator('#code').evaluate(area=>area.setSelectionRange(2,6));
+  const startWidth=await width(),divider=await page.locator('#fileExplorerResize').boundingBox();await page.mouse.move(divider.x+divider.width/2,divider.y+200);await page.mouse.down();await page.mouse.move(divider.x+140,divider.y+200,{steps:8});await page.mouse.up();const resized=await width();assert.ok(resized>startWidth+100);assert.equal(await page.locator('#code').inputValue(),draft);assert.equal(await page.locator('#code').evaluate(area=>area.selectionStart),2);
+  if(process.env.FILE_EXPLORER_CAPTURE)await page.screenshot({path:process.env.FILE_EXPLORER_CAPTURE,animations:'disabled'});
+  await page.locator('#sidebarToggle').click();assert.equal(await width(),36);assert.equal(await page.locator('#fileExplorerResize').isVisible(),false);await page.locator('#sidebarToggle').click();assert.equal(await width(),resized);
+  await page.waitForFunction(()=>document.querySelector('#saveStatus').textContent==='All changes saved');await page.reload();await ready();assert.equal(await width(),resized);assert.equal(await page.locator('#code').inputValue(),draft);
+  await page.locator('#fileExplorerResize').focus();await page.keyboard.press('ArrowRight');assert.equal(await width(),resized+10);await page.keyboard.press('Home');assert.equal(await width(),180);await page.keyboard.press('End');assert.equal(await width(),520);
+  const before=await width(),box=await page.locator('#fileExplorerResize').boundingBox();await page.mouse.move(box.x+3,box.y+180);await page.mouse.down();await page.mouse.move(box.x-100,box.y+180);await page.keyboard.press('Escape');await page.mouse.up();assert.equal(await width(),before);
+  await page.locator('#fileExplorerResize').dblclick();assert.equal(await width(),startWidth);assert.equal(await page.evaluate(()=>localStorage.getItem('labtex-sidebar-width')),null);
+  const image=page.locator('.tree-file[title="images/figure.png"] img');await image.evaluate(node=>node.dataset.retained='yes');let reads=0;page.on('request',request=>{if(request.url().includes('/image?'))reads++;});await page.waitForResponse(response=>response.url()===origin+base);assert.equal(await image.getAttribute('data-retained'),'yes');assert.equal(reads,0,'Polling reuses loaded thumbnails');
+  const metadata=(await api(base)).files.find(file=>file.path==='images/drawing.SVG');await api(base+'/file','PUT',{path:'images/drawing.SVG',revision:metadata.revision,content:svg.replace('width="32"','width="40"')});await page.waitForFunction(()=>document.querySelector('.tree-file[title="images/drawing.SVG"] img').naturalWidth===40);
+  await page.locator('.tree-file[title="images/drawing.SVG"]').click();await page.waitForFunction(()=>document.querySelector('#binaryPreview img')?.naturalWidth===40);assert.deepEqual(probes,[]);
+  await page.setViewportSize({width:800,height:900});assert.ok(await width()<=360);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.setViewportSize({width:390,height:844});assert.equal(await page.locator('#fileExplorerResize').isVisible(),false);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  assert.deepEqual(errors,[]);console.log('PASS named root, private lazy SVG/raster thumbnails, inert SVG, refresh/revision handling, drag/keyboard resize, persistent width, cancel/reset, drafts and mobile');
+ }finally{await browser.close();}
+})().catch(error=>{console.error(error);process.exit(1);});
