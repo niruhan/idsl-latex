@@ -1,14 +1,17 @@
 import {escapeHTML as esc} from './visual.js';
 import {createTypstLive} from './typst-live.js';
 import {createEditHistory} from './edit-history.js';
+import {createSourceFolding} from './source-folding.js';
 const $=id=>document.getElementById(id);
 const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',assetUrl:null,dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,keepPreview:false,githubToken:'',githubSaved:false,backupAuto:false};
 const Home={visible:false,projects:[],folders:[],templates:[],folder:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
 const FileTree={projects:new Map(),searchKey:null,searchCollapsed:new Set()};
+const FileSelection={project:null,items:new Map(),anchor:null,mode:false};
 const EditHistory=createEditHistory();let pendingEdit=null;
 let movingFiles=false,saveTimer,maxSaveTimer,autoTimer,toastTimer,pollBusy=false,compileAgain=false,startingBuild=false,navigationId=0;
 let navigationQueue=Promise.resolve(),pendingNavigations=0;const backupTimers=new Map();
-const Live=createTypstLive({api,state:()=>S,setText,navigate:navigateTypst,toast});
+const Source=createSourceFolding({area:$('code'),gutter:$('lineNumbers'),paint:paintSource,onToggle:()=>{EditHistory.breakGroup();pendingEdit=null;syncScroll();updateStats();}});
+const Live=createTypstLive({api,state:()=>S,setText,navigate:navigateSource,toast,sourceSelection:()=>Source.selection(),selectSource:selection=>restoreEditSelection(selection),visibleLine:()=>Source.visibleLine});
 const isTypst=()=>S.file?.path.endsWith('.typ');
 const isDocument=()=>/\.(tex|typ)$/.test(S.file?.path||'');
 const typstProject=()=>Boolean(S.project?.main.endsWith('.typ'));
@@ -55,33 +58,31 @@ function savedNavigation(task,{saveFirst=true}={}){
  navigationQueue=job.catch(()=>{});return job;
 }
 function editKey(){return `${S.user?.id}:${S.project?.id}:${S.file?.path}`;}
-function editSelection(){const area=$('code');return {mode:'source',start:area.selectionStart,end:area.selectionEnd,direction:area.selectionDirection};}
+function editSelection(){return Source.selection();}
 function restoreEditSelection(selection,fallback=0,focus=true){
- if(S.mode!=='source')return;const area=$('code'),saved=selection||{start:fallback,end:fallback};
- if(focus)area.focus();area.setSelectionRange(saved.start,saved.end,saved.direction||'none');
+ if(S.mode!=='source')return;const saved=selection||{start:fallback,end:fallback};
+ Source.select(saved,{focus});syncScroll();
 }
 function captureEdit(kind=''){pendingEdit={key:editKey(),text:S.text,before:editSelection(),kind};}
 function setText(text,fromVisual=false,options={}){
  const pending=pendingEdit?.key===editKey()&&pendingEdit.text===S.text?pendingEdit:null;pendingEdit=null;
- const before=options.before||pending?.before||editSelection();
- if(!fromVisual&&$('code').value!==text){$('code').value=text;if(S.mode==='source')restoreEditSelection(options.after||before,0,false);}
- if(options.history!==false)EditHistory.record(S.text,text,before,options.after||editSelection(),options.kind??pending?.kind??'');
- S.text=text;S.dirty=S.text!==S.saved;markSaved(S.dirty?'Unsaved changes':'All changes saved',S.dirty?'dirty':'');if(!fromVisual)highlight();keepDraft();scheduleAutosave();updateStats();updateBuild();if(typstProject())scheduleCompile();
+ const before=options.before||pending?.before||editSelection(),after=options.after||before;
+ if(options.history!==false)EditHistory.record(S.text,text,before,after,options.kind??pending?.kind??'');
+ S.text=text;S.dirty=S.text!==S.saved;markSaved(S.dirty?'Unsaved changes':'All changes saved',S.dirty?'dirty':'');if(!fromVisual)highlight(after);keepDraft();scheduleAutosave();updateStats();updateBuild();if(typstProject())scheduleCompile();
 }
 function undoEdit(redo=false){
  if(!editable()||!S.file||S.file.content===null)return;
  const result=EditHistory.step(redo,S.text);pendingEdit=null;if(!result)return;
  setText(result.text,false,{history:false});if(S.mode==='preview')renderAssetPreview();restoreEditSelection(result.selection,result.start);updateStats();
 }
-function highlight(){
- const value=$('code').value;
- $('lineNumbers').textContent=Array.from({length:value.split('\n').length},(_,i)=>i+1).join('\n');
+function highlight(selection){Source.update(editKey(),S.text,isTypst()?'typst':/\.(?:tex|ltx|sty|cls)$/.test(S.file?.path||'')?'latex':'',selection);syncScroll();}
+function paintSource(value){
  $('code').classList.toggle('plain',value.length>400000);
  const pattern=isTypst()?/(\/\/[^\n]*|#[A-Za-z_][\w.-]*|^={1,6}(?= )|[{}[\]]|\$[^$\n]*\$)/gm:/(%[^\n]*|\\[A-Za-z@]+|\\.|[{}]|\$[^$\n]*\$)/g;
  $('highlight').innerHTML=value.length>400000?'':value.split(pattern).map((part,i)=>i%2?`<span class="${part.startsWith('%')||part.startsWith('//')?'comment':/^[\\#=]/.test(part)?'command':part.startsWith('$')?'math':'brace'}">${esc(part)}</span>`:esc(part)).join('')+'\n';syncScroll();
 }
-function syncScroll(){$('highlight').scrollTop=$('code').scrollTop;$('highlight').scrollLeft=$('code').scrollLeft;$('lineNumbers').scrollTop=$('code').scrollTop;}
-function updateStats(){const pos=$('code').selectionStart;const before=$('code').value.slice(0,pos);$('cursorPosition').textContent=`Ln ${before.split('\n').length}, Col ${before.length-before.lastIndexOf('\n')}`;$('wordCount').textContent=(S.text.trim().match(/\S+/g)||[]).length+' words';}
+function syncScroll(){$('highlight').scrollTop=$('code').scrollTop;$('highlight').scrollLeft=$('code').scrollLeft;Source.syncGutter();}
+function updateStats(){const pos=editSelection().start;const before=S.text.slice(0,pos);$('cursorPosition').textContent=`Ln ${before.split('\n').length}, Col ${before.length-before.lastIndexOf('\n')}`;$('wordCount').textContent=(S.text.trim().match(/\S+/g)||[]).length+' words';}
 function editable(){return S.project&&S.project.role!=='viewer';}
 const imageTypes={svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',avif:'image/avif',bmp:'image/bmp',ico:'image/x-icon'};
 const imageType=()=>imageTypes[S.file?.path.split('.').pop().toLowerCase()];
@@ -100,8 +101,9 @@ function editorMode(mode){
  const asset=Boolean(imageType())||S.file?.content===null,preview=asset&&mode==='preview';S.mode=preview?'preview':'source';
  $('sourceTab').classList.toggle('active',!preview);$('assetPreviewTab').classList.toggle('active',preview);$('sourceTab').setAttribute('aria-pressed',String(!preview));$('assetPreviewTab').setAttribute('aria-pressed',String(preview));$('assetViewOptions').hidden=!asset;
  $('sourceEditor').hidden=preview||S.file?.content===null;$('binaryPreview').hidden=!preview;
- EditHistory.breakGroup();pendingEdit=null;if($('code').value!==S.text)$('code').value=S.text;
- if(preview)renderAssetPreview();else highlight();Live.render();
+ for(const id of ['foldAllSource','unfoldAllSource'])$(id).hidden=preview||!(/\.(?:typ|tex|ltx|sty|cls)$/.test(S.file?.path||''));
+ EditHistory.breakGroup();pendingEdit=null;
+ highlight();if(preview)renderAssetPreview();Live.render();
 }
 async function save(){
  cancelAutosave();
@@ -134,6 +136,38 @@ function revealFile(path){
  for(let depth=1;depth<parts.length;depth++)changed=state.collapsed.delete(parts.slice(0,depth).join('/'))||changed;
  if(changed)rememberFolders(state);
 }
+const fileSelectionKey=(path,directory=false)=>(directory?'d:':'f:')+path;
+function resetFileSelection(){FileSelection.project=null;FileSelection.items.clear();FileSelection.anchor=null;FileSelection.mode=false;}
+function syncFileSelection(){
+ if(FileSelection.project!==S.project?.id){resetFileSelection();FileSelection.project=S.project?.id;}
+ const files=new Set(S.project?.files.map(file=>file.path)||[]),folders=new Set();
+ for(const path of files){const parts=path.split('/');for(let index=1;index<parts.length;index++)folders.add(parts.slice(0,index).join('/'));}
+ for(const [key,item] of FileSelection.items)if(!(item.directory?folders:files).has(item.path))FileSelection.items.delete(key);
+}
+function paintFileSelection(){
+ $('fileTree').classList.toggle('file-multi-select',FileSelection.mode||FileSelection.items.size>1);
+ for(const row of $('fileTree').querySelectorAll('[data-selection-key]')){const selected=FileSelection.items.has(row.dataset.selectionKey);row.classList.toggle('selected',selected);row.setAttribute('aria-pressed',String(selected));row.draggable=Boolean(editable()&&!FileSelection.mode&&FileSelection.items.size<=1);}
+}
+function selectFileItem(path,directory,event={}){
+ syncFileSelection();const key=fileSelectionKey(path,directory),multiple=event.ctrlKey||event.metaKey||event.target?.classList.contains('selection-mark')&&$('fileTree').classList.contains('file-multi-select');
+ if(event.shiftKey&&FileSelection.anchor){
+  const rows=[...$('fileTree').querySelectorAll('[data-selection-key]')].filter(row=>row.getClientRects().length),start=rows.findIndex(row=>row.dataset.selectionKey===FileSelection.anchor),end=rows.findIndex(row=>row.dataset.selectionKey===key);
+  if(!multiple)FileSelection.items.clear();
+  if(start>=0&&end>=0)for(const row of rows.slice(Math.min(start,end),Math.max(start,end)+1))FileSelection.items.set(row.dataset.selectionKey,{path:row.title,directory:row.classList.contains('tree-folder')});
+  else FileSelection.items.set(key,{path,directory});
+ }else{
+  if(multiple||FileSelection.mode){if(FileSelection.items.has(key))FileSelection.items.delete(key);else FileSelection.items.set(key,{path,directory});}
+  else{FileSelection.items.clear();FileSelection.items.set(key,{path,directory});}
+  FileSelection.anchor=key;
+ }
+ paintFileSelection();return Boolean(multiple||event.shiftKey||FileSelection.mode);
+}
+function contextFileSelection(path,directory){syncFileSelection();const key=fileSelectionKey(path,directory);if(!FileSelection.items.has(key)){FileSelection.items.clear();FileSelection.items.set(key,{path,directory});FileSelection.anchor=key;}paintFileSelection();}
+function fileSelectionTargets(){
+ const items=[...FileSelection.items.values()],directories=items.filter(item=>item.directory).map(item=>item.path).filter(path=>!items.some(item=>item.directory&&path.startsWith(item.path+'/')));
+ return {pid:S.project.id,directories,paths:items.filter(item=>!item.directory&&!directories.some(folder=>item.path.startsWith(folder+'/'))).map(item=>item.path)};
+}
+function selectedProjectFiles(project,target){return project.files.filter(file=>target.paths.includes(file.path)||target.directories.some(folder=>file.path.startsWith(folder+'/')));}
 const fileDragType='application/x-labtex-file';
 function dragProjectFile(element,path,directory=false){
  element.draggable=Boolean(editable());if(!editable())return;
@@ -156,7 +190,7 @@ async function moveProjectFiles(dragged,folder){
   await refreshAfterFileChange(pid,result.moves[selected]||selected);toast(result.changed?'Moved. Update references to the old paths.':'Already in this folder.');
  }finally{movingFiles=false;$('workspace').inert=Boolean(pendingNavigations);}
 }
-function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toLowerCase();const tree=$('fileTree'),state=folderState();const root={folders:new Map(),files:[]};
+function renderFiles(){if(!S.project)return;syncFileSelection();const term=$('fileFilter').value.toLowerCase();const tree=$('fileTree'),state=folderState();const root={folders:new Map(),files:[]};
  const searchKey=state.key+':'+term;if(FileTree.searchKey!==searchKey){FileTree.searchKey=searchKey;FileTree.searchCollapsed.clear();}
  const collapsed=term?FileTree.searchCollapsed:state.collapsed;
  for(const file of S.project.files.filter(file=>file.path.toLowerCase().includes(term))){
@@ -169,21 +203,21 @@ function renderFiles(){if(!S.project)return;const term=$('fileFilter').value.toL
  let folderId=0;
  function renderNode(node,parent){
   for(const file of node.files){
-   const b=document.createElement('button');b.className='tree-file'+(S.file?.path===file.path?' active':'');b.title=file.path;const ext=file.path.split('.').pop();b.innerHTML=`<span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(file.path.split('/').at(-1))}</span>${file.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',()=>{loadFile(file.path).then(()=>{if(matchMedia('(max-width:700px)').matches)setSidebarCollapsed(true);}).catch(fail);});b.setAttribute('aria-haspopup','menu');b.setAttribute('aria-controls','fileContextMenu');dragProjectFile(b,file.path);
+   const b=document.createElement('button');b.className='tree-file'+(S.file?.path===file.path?' active':'');b.title=file.path;b.dataset.selectionKey=fileSelectionKey(file.path);const ext=file.path.split('.').pop();b.innerHTML=`<span class="selection-mark" aria-hidden="true"></span><span class="file-icon">${esc(ext==='tex'?'T':ext==='bib'?'B':ext.slice(0,3).toUpperCase())}</span><span class="filename">${esc(file.path.split('/').at(-1))}</span>${file.path===S.project.main?'<small>MAIN</small>':''}`;b.addEventListener('click',event=>{event.preventDefault();if(selectFileItem(file.path,false,event))return;loadFile(file.path).then(()=>{if(matchMedia('(max-width:700px)').matches)setSidebarCollapsed(true);}).catch(fail);});b.setAttribute('aria-haspopup','menu');b.setAttribute('aria-controls','fileContextMenu');dragProjectFile(b,file.path);
    const contextMenu=event=>{event.preventDefault();event.stopPropagation();const rect=b.getBoundingClientRect();fileMenu({path:file.path,x:event.clientX||rect.left+20,y:event.clientY||rect.bottom,anchor:b}).catch(fail);};
    b.addEventListener('contextmenu',contextMenu);b.addEventListener('keydown',event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10')contextMenu(event);});parent.append(b);
   }
   for(const [name,folder] of node.folders){
    const row=document.createElement('button'),arrow=document.createElement('span'),label=document.createElement('span'),children=document.createElement('div');
-   row.type='button';row.className='tree-folder';row.dataset.folder=folder.path;row.title=folder.path;dragProjectFile(row,folder.path,true);bindFileDrop(row,folder.path);arrow.setAttribute('aria-hidden','true');label.textContent=name;label.className='filename';row.append(arrow,label);
+   row.type='button';row.className='tree-folder';row.dataset.folder=folder.path;row.dataset.selectionKey=fileSelectionKey(folder.path,true);row.title=folder.path;dragProjectFile(row,folder.path,true);bindFileDrop(row,folder.path);const mark=document.createElement('span');mark.className='selection-mark';mark.setAttribute('aria-hidden','true');arrow.className='folder-chevron';arrow.setAttribute('aria-hidden','true');label.textContent=name;label.className='filename';row.append(mark,arrow,label);
    children.className='tree-children';children.dataset.folder=folder.path;children.id='file-folder-'+folderId++;row.setAttribute('aria-controls',children.id);row.setAttribute('aria-haspopup','menu');
    row.addEventListener('keydown',event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){event.preventDefault();event.stopPropagation();directoryMenu(folder.path,{anchor:row});}});
    function expanded(value){children.hidden=!value;row.setAttribute('aria-expanded',String(value));row.setAttribute('aria-label',(value?'Collapse ':'Expand ')+folder.path);arrow.textContent=value?'▾':'▸';}
-   expanded(!collapsed.has(folder.path));row.addEventListener('click',()=>{const value=children.hidden;if(value)collapsed.delete(folder.path);else collapsed.add(folder.path);if(!term)rememberFolders(state);expanded(value);});
+   expanded(!collapsed.has(folder.path));row.addEventListener('click',event=>{event.preventDefault();if(selectFileItem(folder.path,true,event))return;const value=children.hidden;if(value)collapsed.delete(folder.path);else collapsed.add(folder.path);if(!term)rememberFolders(state);expanded(value);});
    parent.append(row,children);renderNode(folder,children);
   }
  }
- tree.replaceChildren();renderNode(root,tree);
+ tree.replaceChildren();renderNode(root,tree);paintFileSelection();
  $('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';$('mainFile').innerHTML=S.project.files.filter(f=>/\.(tex|typ)$/.test(f.path)).map(f=>`<option value="${esc(f.path)}">${esc(f.path)}</option>`).join('');$('mainFile').value=S.project.main;
 }
 function loadFile(path,force=false){return savedNavigation(()=>readFile(path),{saveFirst:!force});}
@@ -192,17 +226,26 @@ async function readFile(path){const pid=S.project.id;const f=await api(apiPath('
  $('sourceTab').disabled=f.content===null;
  $('code').readOnly=!editable();markSaved('All changes saved');clearAssetPreview();
  if(f.content!==null){let draft;try{draft=JSON.parse(sessionStorage.getItem(draftKey()));}catch{}if(draft&&draft.content!==f.content){S.text=draft.content;S.dirty=true;markSaved('Recovered browser draft','dirty');if(draft.revision!==f.revision){S.conflict=true;await showConflict();}else{toast('Recovered your unsaved draft.');scheduleAutosave();}}}
- EditHistory.select(editKey(),S.text);pendingEdit=null;revealFile(path);editorMode(S.mode);renderFiles();updateStats();Live.changed();
+ syncFileSelection();if(!FileSelection.items.size&&!FileSelection.mode)FileSelection.anchor=fileSelectionKey(path);EditHistory.select(editKey(),S.text);pendingEdit=null;revealFile(path);editorMode(S.mode);renderFiles();updateStats();Live.changed();
 }
-async function navigateTypst(path,range){
+async function navigateSource(path,range){
+ const pid=S.project?.id;
  if(!S.project?.files.some(file=>file.path===path))return;
- if(S.file?.path!==path)await loadFile(path);if(S.file?.path!==path)return;editorMode('source');const lines=S.text.split('\n');
- const index=position=>lines.slice(0,position?.line||0).reduce((sum,line)=>sum+line.length+1,0)+(position?.character||0);
- $('code').focus();$('code').setSelectionRange(index(range?.start),index(range?.end||range?.start));$('code').scrollTop=Math.max(0,((range?.start?.line||0)-3)*23);updateStats();
+ if(S.file?.path!==path)await savedNavigation(async()=>{if(S.project?.id===pid)await readFile(path);});
+ if(S.project?.id!==pid||S.file?.path!==path)return;editorMode('source');const lines=S.text.split('\n');
+ const index=position=>{const line=Math.min(lines.length-1,Math.max(0,position?.line||0));return lines.slice(0,line).reduce((sum,value)=>sum+value.length+1,0)+Math.min(lines[line].length,Math.max(0,position?.character||0));};
+ if($('fileFilter').value&&!path.toLowerCase().includes($('fileFilter').value.toLowerCase())){$('fileFilter').value='';renderFiles();}
+ const start=index(range?.start);Source.select({start,end:index(range?.end||range?.start)},{focus:true});Source.scrollTo(start);syncScroll();updateStats();
 }
+window.addEventListener('message',event=>{
+ const data=event.data;if(event.origin!==location.origin||event.source!==$('pdfFrame').contentWindow||!data||data.project!==S.project?.id||S.pdfKey!==data.project+':'+data.version)return;
+ if(data.type==='pdf-source-unavailable'){toast('Recompile this LaTeX project to enable preview clicks.');return;}
+ if(data.type!=='pdf-source'||!data.range?.start||!['line','character'].every(key=>Number.isInteger(data.range.start[key])&&data.range.start[key]>=0&&data.range.start[key]<=8*1024*1024))return;
+ navigateSource(data.path,{start:data.range.start}).catch(fail);
+});
 function openProject(pid,{historyMode='push'}={}){return savedNavigation(async()=>{cancelProjectRename();closeFileContextMenu();closeEditorMenu();Live.stop();const navigation=++navigationId;clearTimeout(autoTimer);const project=await api('/api/projects/'+pid);if(navigation!==navigationId)return;S.project=project;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;$('projectTitle').textContent=S.project.name;document.title=S.project.name+' · IDSL Editor';$('roleLabel').textContent=S.project.role;$('editorDeleteProject').hidden=S.project.role!=='owner';for(const id of ['compileButton','firstCompileButton','newFileButton','uploadButton','mainFile'])$(id).disabled=!editable();$('autoCompile').disabled=!editable();$('shareButton').disabled=false;$('backupButton').disabled=S.project.role!=='owner';renderFiles();await readFile(S.project.files.some(f=>f.path===S.project.main)?S.project.main:S.project.files[0].path);if(S.project?.id!==pid||navigation!==navigationId)return;Home.visible=false;$('projectHome').hidden=true;$('workspace').hidden=false;$('auth').hidden=true;updateBuild(true);$('autoCompile').checked=localStorage.getItem('labtex-auto:'+pid)==='true'||false;$('workspaceLanguage').textContent=S.project.main.endsWith('.typ')?'TYPST WORKSPACE':'LATEX WORKSPACE';closeModal();Live.open().then(enabled=>{if(S.project?.id===pid&&!enabled&&!typstProject()&&$('autoCompile').checked&&!S.project.build)scheduleCompile();});if(!S.invite)setProjectRoute('#project='+pid,historyMode);});}
 // A fresh browsing context keeps PDF loads out of page Back/Forward history.
-// Unloading it on the home page also releases the native PDF viewer.
+// Unloading it on the home page also releases the PDF worker and rendered pages.
 function replacePdfFrame(src=null){
  const previous=$('pdfFrame');
  if(src&&previous.getAttribute('src')===src)return;
@@ -212,7 +255,7 @@ function replacePdfFrame(src=null){
 }
 function updateBuild(force=false){if(!S.project)return;const b=S.project.build;const stale=S.dirty||b&&b.revision!==S.project.revision;$('downloadButton').disabled=S.building||!(b?.success||typstProject()&&editable());$('openPdfButton').disabled=!b?.success;updatePdfTheme();if(Live.render())return;if(S.building)return;
  $('buildStatus').textContent=b?(b.success?(stale?'Changes since last build':`Compiled in ${b.seconds}s`):'Build failed'):'Ready to compile';$('buildStatus').className='build-status '+(b&&!b.success?'failed':stale?'stale':'');$('logBadge').textContent=b&&!b.success?'●':'';
- if(b?.success){const key=S.project.id+':'+b.created;if(force||S.pdfKey!==key){S.pdfKey=key;replacePdfFrame(apiPath('pdf')+'?v='+b.created+'#toolbar=0&view=FitH');}$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else if(S.keepPreview&&S.pdfKey){$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else{$('pdfEmpty').hidden=false;$('pdfFrame').hidden=true;}
+ if(b?.success){const key=S.project.id+':'+b.created;if(force||S.pdfKey!==key){S.pdfKey=key;replacePdfFrame('/pdf-viewer.html?project='+S.project.id+'&v='+b.created);}$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else if(S.keepPreview&&S.pdfKey){$('pdfEmpty').hidden=true;$('pdfFrame').hidden=false;}else{$('pdfEmpty').hidden=false;$('pdfFrame').hidden=true;}
  Live.render();
 }
 async function compile({automatic=false}={}){
@@ -236,8 +279,8 @@ async function compile({automatic=false}={}){
   if(compileAgain){compileAgain=false;scheduleCompile();}
  }
 }
-function projects({historyMode='push',folder=Home.folder}={}){return savedNavigation(async()=>{
- cancelProjectRename();closeFileContextMenu();closeEditorMenu();Live.stop();++navigationId;clearTimeout(autoTimer);
+function projects({historyMode='push',folder=S.project?(S.project.folder??null):Home.folder}={}){return savedNavigation(async()=>{
+ cancelProjectRename();closeFileContextMenu();closeEditorMenu();Live.stop();resetFileSelection();++navigationId;clearTimeout(autoTimer);
  S.project=null;S.file=null;S.dirty=false;S.pdfKey=null;S.keepPreview=false;replacePdfFrame();clearAssetPreview();
  $('workspace').hidden=true;$('auth').hidden=true;$('projectHome').hidden=false;
  Home.visible=true;Home.folder=folder;Home.filter='all';$('projectSearch').value='';closeModal();document.title='Projects · IDSL Editor';
@@ -311,7 +354,7 @@ function renderProjectFolders(){
  const breadcrumbs=$('folderBreadcrumbs');breadcrumbs.replaceChildren();
  for(const folder of [{id:null,name:'All projects'},...projectFolderChain(Home.folder)]){
   if(breadcrumbs.childNodes.length){const separator=document.createElement('span');separator.textContent='›';separator.setAttribute('aria-hidden','true');breadcrumbs.append(separator);}
-  const link=document.createElement('a');link.textContent=folder.name;if(folder.id===Home.folder)link.setAttribute('aria-current','page');projectFolderLink(link,folder.id);breadcrumbs.append(link);
+  const link=document.createElement('a');link.textContent=folder.name;if(folder.id===null)link.id='rootProjectFolder';if(folder.id===Home.folder)link.setAttribute('aria-current','page');projectFolderLink(link,folder.id);breadcrumbs.append(link);
  }
 }
 function projectFolderOptions(exclude=null){
@@ -369,8 +412,13 @@ async function trashDialog(){
 }
 function explorerProjectActions(project){
  const menu=document.createElement('details');menu.className='project-actions';menu.dataset.projectActions=project.id;
- menu.innerHTML=`<summary class="project-menu-button" title="Project actions" aria-label="Actions for ${esc(project.name)}">⋯</summary><div class="project-action-list">${project.role!=='viewer'?`<button data-rename-project="${project.id}">Rename</button>`:''}<button data-move-project="${project.id}">Move to folder</button><button data-download-project="${project.id}">Download source ZIP</button>${project.role==='owner'?`<button class="danger" data-delete-project="${project.id}">Delete</button>`:''}</div>`;
+ menu.innerHTML=`<summary class="project-menu-button" title="Project actions" aria-label="Actions for ${esc(project.name)}">⋯</summary><div class="project-action-list">${project.role!=='viewer'?`<button data-rename-project="${project.id}">Rename</button>`:''}<button data-duplicate-project="${project.id}">Duplicate</button><button data-move-project="${project.id}">Move to folder</button><button data-download-project="${project.id}">Download source ZIP</button>${project.role==='owner'?`<button class="danger" data-delete-project="${project.id}">Delete</button>`:''}</div>`;
  menu.addEventListener('toggle',()=>{if(menu.open)closeProjectMenus(menu);});
+ let copying=false;
+ menu.querySelector('[data-duplicate-project]').addEventListener('click',async event=>{
+  if(copying)return;copying=true;const button=event.currentTarget;button.disabled=true;menu.open=false;
+  try{await api('/api/projects/'+project.id+'/duplicate','POST',{});await refreshProjects();toast('Project duplicated.');}catch(error){fail(error);}finally{copying=false;button.disabled=false;}
+ });
  for(const [selector,callback] of [['[data-rename-project]',renameExplorerProject],['[data-move-project]',moveProjectDialog],['[data-download-project]',project=>downloadUrl('/api/projects/'+project.id+'/source.zip')],['[data-delete-project]',deleteExplorerProject]]){
   menu.querySelector(selector)?.addEventListener('click',()=>{menu.open=false;callback(project);});
  }
@@ -486,11 +534,21 @@ function positionFileMenu(options={}){
  (menu.querySelector('[role=menuitem]:not(:disabled)')||menu).focus();
 }
 function directoryMenu(folder='',options={}){
- if(!S.project)return;closeFileContextMenu();closeAccountMenu();closeEditorMenu();const pid=S.project.id,menu=$('fileContextMenu'),disabled=editable()?'':'disabled';
+ if(!S.project)return;closeFileContextMenu();closeAccountMenu();closeEditorMenu();if(folder)contextFileSelection(folder,true);else syncFileSelection();if(FileSelection.items.size>1){selectionMenu(options);return;}const pid=S.project.id,menu=$('fileContextMenu'),disabled=editable()?'':'disabled';
  fileMenuAnchor=options.anchor||$('fileTree');
  // Folder rows use aria-expanded for their children; do not overwrite it for the menu.
- menu.setAttribute('aria-label','Folder actions');menu.innerHTML=`<div class="file-menu-heading">${esc(folder||'Project root')}</div><button id="directoryNewFile" role="menuitem" ${disabled}>New file…</button><button id="directoryUpload" role="menuitem" ${disabled}>Upload files…</button>`;
- action('directoryNewFile',()=>{closeFileContextMenu();return addFile(folder,pid);});action('directoryUpload',()=>{closeFileContextMenu();chooseUpload(folder,pid);});positionFileMenu(options);
+ const protectedMain=folder&&S.project.main.startsWith(folder+'/');
+ menu.setAttribute('aria-label','Folder actions');menu.innerHTML=`<div class="file-menu-heading">${esc(folder||'Project root')}</div><button id="directoryNewFile" role="menuitem" ${disabled}>New file…</button><button id="directoryUpload" role="menuitem" ${disabled}>Upload files…</button><hr><button id="selectProjectFiles" role="menuitem" ${disabled}>${FileSelection.mode?'Finish selecting':'Select files…'}</button><button id="selectAllProjectFiles" role="menuitem" ${disabled}>Select all visible files</button>${folder?'<hr><button id="directoryDelete" class="danger" role="menuitem" '+(protectedMain?'disabled title="Choose another main document before deleting this folder."':disabled)+'>Delete folder…</button>':''}`;
+ action('directoryNewFile',()=>{closeFileContextMenu();return addFile(folder,pid);});action('directoryUpload',()=>{closeFileContextMenu();chooseUpload(folder,pid);});
+ action('selectProjectFiles',()=>{const mode=!FileSelection.mode;FileSelection.items.clear();FileSelection.anchor=null;FileSelection.mode=mode;paintFileSelection();closeFileContextMenu(true);});
+ action('selectAllProjectFiles',()=>{FileSelection.items.clear();for(const row of $('fileTree').querySelectorAll('.tree-file'))if(row.getClientRects().length)FileSelection.items.set(row.dataset.selectionKey,{path:row.title,directory:false});FileSelection.mode=true;paintFileSelection();closeFileContextMenu(true);});
+ if(folder)action('directoryDelete',()=>{closeFileContextMenu();return deleteProjectFiles({pid,paths:[],directories:[folder]});});positionFileMenu(options);
+}
+function selectionMenu(options={}){
+ const target=fileSelectionTargets(),menu=$('fileContextMenu'),protectedMain=selectedProjectFiles(S.project,target).some(file=>file.path===S.project.main);
+ fileMenuAnchor=options.anchor||$('fileTree');menu.setAttribute('aria-label','Selection actions');
+ menu.innerHTML=`<div class="file-menu-heading">${FileSelection.items.size} items selected</div><button id="deleteSelectedFiles" class="danger" role="menuitem" ${!editable()?'disabled':protectedMain?'disabled title="Unselect the main document or choose another main document first."':''}>Delete selected…</button><button id="clearFileSelection" role="menuitem">Clear selection</button>`;
+ action('deleteSelectedFiles',()=>{closeFileContextMenu();return deleteProjectFiles(target);});action('clearFileSelection',()=>{FileSelection.items.clear();FileSelection.anchor=null;FileSelection.mode=false;paintFileSelection();closeFileContextMenu(true);});positionFileMenu(options);
 }
 $('fileTree').tabIndex=0;$('fileContextMenu').tabIndex=-1;
 $('projectFiles').addEventListener('contextmenu',event=>{
@@ -498,7 +556,13 @@ $('projectFiles').addEventListener('contextmenu',event=>{
  const container=event.target.closest('.tree-folder,.tree-children'),folder=container?.dataset.folder||'';
  directoryMenu(folder,{anchor:container?.classList.contains('tree-folder')?container:$('fileTree'),x:event.clientX,y:event.clientY});
 });
-$('fileTree').addEventListener('keydown',event=>{if(event.target===$('fileTree')&&(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10')){event.preventDefault();directoryMenu();}});
+$('fileTree').setAttribute('aria-description','Cmd or Ctrl-click selects multiple items. Shift-click selects a range. Right-click for file and folder actions.');
+$('fileTree').addEventListener('keydown',event=>{
+ if(event.target===$('fileTree')&&(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10')){event.preventDefault();directoryMenu();return;}
+ if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){event.preventDefault();syncFileSelection();FileSelection.items.clear();for(const row of $('fileTree').querySelectorAll('[data-selection-key]'))if(row.getClientRects().length)FileSelection.items.set(row.dataset.selectionKey,{path:row.title,directory:row.classList.contains('tree-folder')});paintFileSelection();}
+ else if(event.key==='Escape'){FileSelection.items.clear();FileSelection.anchor=null;FileSelection.mode=false;paintFileSelection();}
+ else if(['Delete','Backspace'].includes(event.key)&&editable()&&FileSelection.items.size){event.preventDefault();deleteProjectFiles(fileSelectionTargets()).catch(fail);}
+});
 async function refreshAfterFileChange(pid,path,{reload=false}={}){
  if(S.project?.id!==pid)return;const project=await api('/api/projects/'+pid);if(S.project?.id!==pid)return;
  S.project=project;const selected=path||S.file?.path,next=project.files.some(file=>file.path===selected)?selected:project.main;
@@ -512,14 +576,34 @@ function renameProjectFile(target){
 }
 function deleteProjectFile(target){
  modal('Delete file?',`<p>Delete <strong>${esc(target.path)}</strong> and its saved history? Document references to it will need updating.</p><form id="deleteFileForm"><div class="actions"><button type="button" id="cancelFileAction" class="outline">Cancel</button><button id="confirmDeleteFile" class="primary">Delete file</button></div></form>`);action('cancelFileAction',closeModal);
- $('deleteFileForm').addEventListener('submit',async event=>{event.preventDefault();const button=$('confirmDeleteFile');if(button.disabled)return;button.disabled=true;try{await api('/api/projects/'+target.pid+'/file','DELETE',{path:target.path,revision:target.revision});await refreshAfterFileChange(target.pid);closeModal();toast('File deleted.');}catch(error){fail(error);}finally{button.disabled=false;}});
+ $('deleteFileForm').addEventListener('submit',async event=>{event.preventDefault();const button=$('confirmDeleteFile');if(button.disabled)return;button.disabled=true;try{await api('/api/projects/'+target.pid+'/file','DELETE',{path:target.path,revision:target.revision});clearDeletedFileState(target.pid,[target.path]);await refreshAfterFileChange(target.pid);closeModal();toast('File deleted.');}catch(error){fail(error);}finally{button.disabled=false;}});
 }
+function clearDeletedFileState(pid,paths){
+ for(const path of paths){sessionStorage.removeItem(`labtex-draft:${S.user.id}:${pid}:${path}`);EditHistory.forget(`${S.user.id}:${pid}:${path}`);Source.forget(`${S.user.id}:${pid}:${path}`);}
+ if(S.project?.id===pid){FileSelection.items.clear();FileSelection.anchor=null;FileSelection.mode=false;}
+}
+function deleteProjectFiles(target){return savedNavigation(async()=>{
+ if(!editable()||S.project?.id!==target.pid)return;const project=await api('/api/projects/'+target.pid);if(S.project?.id!==target.pid)return;
+ const files=selectedProjectFiles(project,target);
+ if(!files.length||target.paths.some(path=>!project.files.some(file=>file.path===path))||target.directories.some(folder=>!project.files.some(file=>file.path.startsWith(folder+'/'))))throw Error('A selected item changed. Reopen the delete menu.');
+ if(files.some(file=>file.path===project.main))throw Error('Unselect the main document or choose another main document before deleting this selection.');
+ modal(target.directories.length===1&&!target.paths.length?'Delete folder?':`Delete ${files.length} files?`,`<p>Delete ${files.length} ${files.length===1?'file':'files'}${target.directories.length?' including all contents of the selected folders':''} and their saved history?</p><ul class="delete-file-list">${files.map(file=>`<li>${esc(file.path)}</li>`).join('')}</ul><form id="deleteFilesForm"><div class="actions"><button type="button" id="cancelFileAction" class="outline">Cancel</button><button id="confirmDeleteFiles" class="primary">Delete ${files.length===1?'file':files.length+' files'}</button></div></form>`);action('cancelFileAction',closeModal);
+ $('deleteFilesForm').addEventListener('submit',async event=>{
+  event.preventDefault();const button=$('confirmDeleteFiles');if(button.disabled||movingFiles)return;button.disabled=true;movingFiles=true;$('workspace').inert=true;
+  try{
+   if(S.project?.id!==target.pid||!await save()||S.project?.id!==target.pid)return;
+   const result=await api('/api/projects/'+target.pid+'/delete-files','POST',{paths:target.paths,directories:target.directories,revision:project.revision});
+   clearDeletedFileState(target.pid,result.deleted);await refreshAfterFileChange(target.pid);if(S.project?.id===target.pid){closeModal();toast(result.deleted.length+' '+(result.deleted.length===1?'file deleted.':'files deleted.'));}
+  }catch(error){fail(error);}finally{movingFiles=false;$('workspace').inert=Boolean(pendingNavigations);button.disabled=false;}
+ });
+});}
 function replaceProjectFile(target){
  modal('Replace file',`<form id="replaceFileForm"><p>Replace <strong>${esc(target.path)}</strong>. Its project path stays the same; the previous version is kept in file history.</p><label>Replacement file<input id="replacementFile" type="file" required></label><p class="hint">Choose the same file format. Maximum size: 8 MB.</p><div class="actions"><button type="button" id="cancelFileAction" class="outline">Cancel</button><button id="confirmReplaceFile" class="primary">Replace file</button></div></form>`);action('cancelFileAction',closeModal);
  $('replaceFileForm').addEventListener('submit',async event=>{event.preventDefault();const file=$('replacementFile').files[0],button=$('confirmReplaceFile');if(!file||button.disabled)return;button.disabled=true;try{if(file.size>8*1024*1024)throw Error('Replacement exceeds 8 MB.');await api('/api/projects/'+target.pid+'/file','PUT',{path:target.path,base64:await base64File(file),revision:target.revision});await refreshAfterFileChange(target.pid,undefined,{reload:S.file?.path===target.path});closeModal();toast('File replaced.');}catch(error){fail(error);}finally{button.disabled=false;}});
 }
 async function fileMenu(options={}){
- if(!S.project)return;closeFileContextMenu();closeAccountMenu();closeEditorMenu();const ticket=fileMenuTicket,pid=S.project.id,path=options.path||S.file?.path;if(!path||!await save()||S.project?.id!==pid)return;
+ if(!S.project)return;closeFileContextMenu();closeAccountMenu();closeEditorMenu();const ticket=fileMenuTicket,pid=S.project.id,path=options.path||S.file?.path;if(!path)return;contextFileSelection(path,false);if(!await save()||S.project?.id!==pid)return;
+ if(ticket!==fileMenuTicket)return;if(FileSelection.items.size>1){selectionMenu(options);return;}
  // Read the menu's target without navigating away from the open editor.
  const file=S.file?.path===path?{...S.file,content:S.file.content===null?null:S.text}:await api('/api/projects/'+pid+'/file?path='+encodeURIComponent(path));
  if(ticket!==fileMenuTicket||S.project?.id!==pid)return;
@@ -619,7 +703,7 @@ document.addEventListener('keydown',event=>{
  if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='b'){event.preventDefault();if(!sidebarCollapsed&&$('projectFiles').contains(document.activeElement))$('sidebarToggle').focus();setSidebarCollapsed(!sidebarCollapsed);}
  if(event.key==='Escape'&&!event.defaultPrevented){if(!$('editorMenu').hidden){event.preventDefault();closeEditorMenu(true);}else if(!sidebarCollapsed&&matchMedia('(max-width:700px)').matches){event.preventDefault();setSidebarCollapsed(true);$('sidebarToggle').focus();}}
 });
-action('closeModal',closeModal);action('projectsButton',projects);action('projectsNavButton',projects);action('sourceTab',()=>{editorMode('source');$('code').focus();});action('assetPreviewTab',()=>editorMode('preview'));action('compileButton',compile);action('firstCompileButton',compile);action('shareButton',share);action('backupButton',backupDialog);action('newFileButton',addFile);action('uploadButton',chooseUpload);
+action('closeModal',closeModal);action('projectsButton',()=>projects({folder:null}));action('projectsNavButton',()=>projects({folder:null}));action('sourceTab',()=>{editorMode('source');$('code').focus();});action('assetPreviewTab',()=>editorMode('preview'));action('compileButton',compile);action('firstCompileButton',compile);action('shareButton',share);action('backupButton',backupDialog);action('newFileButton',addFile);action('uploadButton',chooseUpload);
 action('downloadButton',async()=>{const pid=S.project?.id;if(typstProject()&&editable()&&!await compile())return;if(S.project?.id===pid&&S.project?.build?.success)downloadUrl(apiPath('pdf')+'?download=1');});action('openPdfButton',()=>{if(S.project?.build?.success)window.open(apiPath('pdf'),'_blank','noopener');});action('exportSourceButton',async()=>{const pid=S.project?.id;if(await save()&&S.project?.id===pid)downloadUrl(apiPath('source.zip'));});action('logButton',async()=>{$('logPanel').hidden=!$('logPanel').hidden;if(!$('logPanel').hidden&&S.project?.build){const log=await api(apiPath('log'));$('buildLog').textContent=log.log;renderDiagnostics(log.log);}});action('closeLog',()=>$('logPanel').hidden=true);
 let projectRename=null;
 function cancelProjectRename(focus=false){projectRename=null;$('projectTitleInput').hidden=true;$('projectTitleInput').disabled=false;$('projectTitle').hidden=false;if(focus)$('projectTitle').focus();}
@@ -659,7 +743,7 @@ function accountMenu(anchor){
  const menu=$('accountDropdown'),wasOpen=!menu.hidden&&accountAnchor===anchor;closeAccountMenu();closeEditorMenu();closeFileContextMenu();if(wasOpen)return;accountAnchor=anchor;
  menu.innerHTML=`<div class="account-menu-heading"><strong>${esc(S.user.name)}</strong><small>${esc(S.user.email)}</small></div><button id="accountProjects" role="menuitem">My projects</button><button id="accountAppearance" role="menuitem">Themes &amp; appearance</button>${!S.project?'<button id="accountBackups" role="menuitem">GitHub backups</button>':''}${S.project?.role==='owner'?'<button id="accountProjectBackup" role="menuitem">Back up this project</button>':''}${S.canInviteLab?'<hr><button id="inviteLabMembers" role="menuitem">Invite lab members</button><button id="approvedEmailsButton" role="menuitem">Approved emails</button>':''}${S.demo?'<p class="hint">Local preview account</p>':'<hr><button id="signOut" role="menuitem">Sign out</button>'}${S.project?.role==='owner'?'<hr><button id="deleteProject" class="danger" role="menuitem">Delete project</button>':''}`;
  function item(id,fn){action(id,()=>{closeAccountMenu();return fn();});}
- item('accountProjects',projects);item('accountAppearance',appearanceDialog);if(!S.project)item('accountBackups',allBackupsDialog);if(S.project?.role==='owner')item('accountProjectBackup',backupDialog);
+ item('accountProjects',()=>projects({folder:null}));item('accountAppearance',appearanceDialog);if(!S.project)item('accountBackups',allBackupsDialog);if(S.project?.role==='owner')item('accountProjectBackup',backupDialog);
  if(S.canInviteLab){item('inviteLabMembers',labSignupDialog);item('approvedEmailsButton',approvedEmailsDialog);}
  if(!S.demo)item('signOut',()=>savedNavigation(async()=>{await api('/api/logout','POST',{});for(const key of Object.keys(sessionStorage))if(key.startsWith('labtex-draft:'+S.user.id+':'))sessionStorage.removeItem(key);location.href='/';}));
  if(S.project?.role==='owner')item('deleteProject',()=>deleteExplorerProject({...S.project}));
@@ -676,12 +760,15 @@ document.addEventListener('click',dismissAccountMenuOutside,true);
 window.addEventListener('blur',()=>closeAccountMenu());
 document.addEventListener('keydown',event=>{const menu=$('accountDropdown');if(menu.hidden)return;if(event.key==='Escape'){event.preventDefault();closeAccountMenu(true);return;}if(event.key==='Tab'){closeAccountMenu(true);return;}if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;event.preventDefault();const items=[...menu.querySelectorAll('[role=menuitem]')],index=items.indexOf(document.activeElement);items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();});
 window.addEventListener('resize',positionAccountMenu);window.addEventListener('scroll',()=>closeAccountMenu(),{passive:true});
-action('helpButton',()=>modal('A workspace that stays out of the way',`<p><strong>Ctrl / Cmd + Z</strong> undoes. <strong>Ctrl / Cmd + Shift + Z</strong> or <strong>Ctrl + Y</strong> redoes. <strong>Ctrl / Cmd + S</strong> saves. <strong>Ctrl / Cmd + Enter</strong> compiles. Tab inserts two spaces in source mode.</p><p>Download your Overleaf project as a ZIP and import it from the project picker. Choose its main .tex or .typ document in the project ⋯ menu. Upload figures, bibliography files, classes, and styles with the upload button.</p><p><strong>Ctrl / Cmd + B</strong> toggles Project files. Right-click a file for its history. Preview colors and GitHub backup are beside the theme toggle. Use the project <strong>⋯</strong> menu for sharing, source ZIP, the main document, build logs, and document details.</p><p>Edit LaTeX and Typst directly in source. Typst uses live preview; Export PDF creates a downloadable PDF without switching the preview. Ctrl/Cmd+Space opens completions, Ctrl/Cmd+Shift+Space shows documentation, F12 opens a definition, Shift+Alt/Option+F formats, and Alt/Option+Enter reveals the cursor in the live preview. Editing is shared through autosave and periodic refresh, with conflict detection; this version does not merge simultaneous keystrokes.</p><p>Up to 30 saved versions per file are available, within a 40 MB history limit per project. Deleting a file removes its history. Browser drafts survive a refresh in the same tab.</p><p>This server allows 300 seconds per build, 8 MB per file, 40 MB of current files per project, and 25 owned projects per account. Shell escape is disabled.</p>`));
+action('foldAllSource',()=>{closeEditorMenu();Source.all(true);});
+action('unfoldAllSource',()=>{closeEditorMenu();Source.all(false);});
+action('helpButton',()=>modal('A workspace that stays out of the way',`<p><strong>Ctrl / Cmd + Z</strong> undoes. <strong>Ctrl / Cmd + Shift + Z</strong> or <strong>Ctrl + Y</strong> redoes. <strong>Ctrl / Cmd + S</strong> saves. <strong>Ctrl / Cmd + Enter</strong> compiles. Tab inserts two spaces in source mode. Click the gutter arrows to fold sections, slides and code blocks. <strong>Ctrl/Cmd+Shift+[</strong> folds the block at the cursor; <strong>Ctrl/Cmd+Shift+]</strong> unfolds it. Fold or unfold all blocks from the project <strong>⋯</strong> menu.</p><p>Download your Overleaf project as a ZIP and import it from the project picker. Choose its main .tex or .typ document in the project ⋯ menu. Upload figures, bibliography files, classes, and styles with the upload button.</p><p><strong>Ctrl / Cmd + B</strong> toggles Project files. Right-click a file for its history. Preview colors and GitHub backup are beside the theme toggle. Use the project <strong>⋯</strong> menu for sharing, source ZIP, the main document, build logs, and document details.</p><p>Edit LaTeX and Typst directly in source. Typst uses live preview; Export PDF creates a downloadable PDF without switching the preview. Ctrl/Cmd+Space opens completions, Ctrl/Cmd+Shift+Space shows documentation, F12 opens a definition, Shift+Alt/Option+F formats, and Alt/Option+Enter reveals the cursor in the live preview. Editing is shared through autosave and periodic refresh, with conflict detection; this version does not merge simultaneous keystrokes.</p><p>Up to 30 saved versions per file are available, within a 40 MB history limit per project. Deleting a file removes its history. Browser drafts survive a refresh in the same tab.</p><p>This server allows 300 seconds per build, 8 MB per file, 40 MB of current files per project, and 25 owned projects per account. Shell escape is disabled.</p>`));
 // Keep editing shortcuts scoped to the document, so search and dialog fields
 // retain their normal browser undo. Keep history local to source editing.
 const editorPane=document.querySelector('.editor-pane');
 editorPane.addEventListener('beforeinput',event=>{
  if(['historyUndo','historyRedo'].includes(event.inputType)){event.preventDefault();undoEdit(event.inputType==='historyRedo');return;}
+ if(event.target===$('code'))Source.prepareEdit(event.inputType);
  captureEdit(event.inputType);
 },true);
 editorPane.addEventListener('paste',()=>captureEdit('insertFromPaste'),true);
@@ -689,12 +776,19 @@ editorPane.addEventListener('pointerdown',()=>EditHistory.breakGroup(),true);
 editorPane.addEventListener('keydown',event=>{
  if(event.isComposing)return;
  const key=event.key.toLowerCase(),modifier=event.ctrlKey||event.metaKey;
+ if(event.target===$('code')&&modifier&&event.shiftKey&&['BracketLeft','BracketRight'].includes(event.code)){event.preventDefault();event.stopPropagation();Source.atCursor(event.code==='BracketLeft');return;}
  if(modifier&&!event.altKey&&(key==='z'||key==='y'&&event.ctrlKey)){
   event.preventDefault();event.stopPropagation();undoEdit(key==='y'||event.shiftKey);return;
  }
  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown'].includes(event.key))EditHistory.breakGroup();
 },true);
-$('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener('input',()=>setText($('code').value));$('code').addEventListener('scroll',syncScroll);$('code').addEventListener('click',updateStats);$('code').addEventListener('keyup',updateStats);$('code').addEventListener('keydown',e=>{if(e.key==='Tab'&&editable()){e.preventDefault();const area=e.target,before=editSelection();area.setRangeText('  ',area.selectionStart,area.selectionEnd,'end');setText(area.value,false,{before,kind:'tab'});}});$('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();Live.open().then(enabled=>{if(!enabled&&$('autoCompile').checked)scheduleCompile();});}catch(e){fail(e);}});
+$('code').addEventListener('copy',copySource);$('code').addEventListener('cut',copySource);
+function copySource(event){
+ if(!Source.folded||!event.clipboardData)return;const before=editSelection();if(before.start===before.end)return;
+ event.preventDefault();event.clipboardData.setData('text/plain',S.text.slice(before.start,before.end));
+ if(event.type==='cut'&&editable())setText(S.text.slice(0,before.start)+S.text.slice(before.end),false,{before,after:{mode:'source',start:before.start,end:before.start},kind:'deleteByCut'});
+}
+$('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener('input',()=>{const change=Source.input();setText(change.text,false,{after:change.after});});$('code').addEventListener('scroll',syncScroll);$('code').addEventListener('click',updateStats);$('code').addEventListener('keyup',updateStats);$('code').addEventListener('keydown',e=>{if(e.key==='Tab'&&editable()){e.preventDefault();Source.prepareEdit('insertText');const before=editSelection(),pos=before.start+2;setText(S.text.slice(0,before.start)+'  '+S.text.slice(before.end),false,{before,after:{mode:'source',start:pos,end:pos},kind:'tab'});}});$('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();Live.open().then(enabled=>{if(!enabled&&$('autoCompile').checked)scheduleCompile();});}catch(e){fail(e);}});
 $('autoCompile').addEventListener('change',()=>{localStorage.setItem('labtex-auto:'+S.project.id,String($('autoCompile').checked));clearTimeout(autoTimer);if($('autoCompile').checked)compile().catch(fail);});
 $('uploadFiles').addEventListener('cancel',()=>{uploadTarget=null;});
 $('uploadFiles').addEventListener('change',async event=>{
@@ -726,7 +820,7 @@ function renderDiagnostics(log){
  for(const match of log.matchAll(/^(.+?\.(?:typ|tex)):(\d+):(\d+):\s*(.*)$/gm)){
   const [,path,line,col,message]=match;if(seen.has(match[0])||!S.project.files.some(f=>f.path===path))continue;seen.add(match[0]);
   const button=document.createElement('button');button.className='diagnostic';button.textContent=`${path}:${line}:${col} — ${message}`;
-  button.addEventListener('click',async()=>{try{await loadFile(path);editorMode('source');const rows=S.text.split('\n');const pos=rows.slice(0,Number(line)-1).reduce((sum,row)=>sum+row.length+1,0)+Number(col)-1;$('code').focus();$('code').setSelectionRange(pos,pos);$('code').scrollTop=Math.max(0,(Number(line)-4)*23);updateStats();}catch(e){fail(e);}});list.append(button);
+  button.addEventListener('click',()=>navigateSource(path,{start:{line:Number(line)-1,character:Number(col)-1}}).catch(fail));list.append(button);
  }
 }
 
@@ -852,9 +946,9 @@ async function backupDialog(){
 
 // The project explorer is a page, with browser-history navigation to editors.
 action('createProject',newProject);action('emptyNewProject',newProject);action('importProject',()=>$('importZip').click());action('refreshProjects',refreshProjects);
-action('upProjectFolder',()=>showProjectFolder(Home.folders.find(folder=>folder.id===Home.folder)?.parent||null));action('rootProjectFolder',()=>showProjectFolder(null));
+action('upProjectFolder',()=>showProjectFolder(Home.folders.find(folder=>folder.id===Home.folder)?.parent||null));
 action('createProjectFolder',()=>projectFolderDialog());action('sidebarNewFolder',()=>projectFolderDialog());action('manageProjectFolder',()=>projectFolderDialog(Home.folders.find(folder=>folder.id===Home.folder)));
-bindProjectDrop(document.querySelector('[data-project-filter="all"]'),null);bindProjectDrop($('rootProjectFolder'),null);
+bindProjectDrop(document.querySelector('[data-project-filter="all"]'),null);
 $('upProjectFolder').addEventListener('dragover',event=>{if(!Array.from(event.dataTransfer.types).some(type=>['application/x-labtex-project','application/x-labtex-folder'].includes(type)))return;event.preventDefault();event.dataTransfer.dropEffect='move';$('upProjectFolder').classList.add('folder-drop-target');});
 $('upProjectFolder').addEventListener('dragleave',()=>$('upProjectFolder').classList.remove('folder-drop-target'));
 $('upProjectFolder').addEventListener('drop',event=>{event.preventDefault();$('upProjectFolder').classList.remove('folder-drop-target');const parent=Home.folders.find(folder=>folder.id===Home.folder)?.parent||null,id=event.dataTransfer.getData('application/x-labtex-folder');if(id)moveExplorerFolder(id,parent).catch(fail);else{const project=Home.projects.find(project=>project.id===event.dataTransfer.getData('application/x-labtex-project'));if(project)moveProjectToFolder(project,parent).catch(fail);}});

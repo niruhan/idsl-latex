@@ -12,6 +12,7 @@ from project_templates import TEMPLATES, template_files
 from credential_store import token_store, valid_token
 from typst_service import TypstService
 ROOT=Path(__file__).resolve().parent
+PDF_ASSETS={'/vendor/pdfjs/'+name:'vendor/pdfjs/'+name for name in json.loads((ROOT/'web/vendor/pdfjs/UPSTREAM.json').read_text())['files']}
 MAX_OWNED_PROJECTS=25
 MAX_PROJECT_FOLDERS=100
 MAX_FOLDER_DEPTH=10
@@ -67,7 +68,7 @@ def email_address(s):
     return s
 
 def delete_project_rows(db,pid):
-    for table in ('members','files','history','invites','builds','project_backups','shared_project_backups','project_locations','project_trash'):
+    for table in ('members','files','history','invites','builds','build_sources','project_backups','shared_project_backups','project_locations','project_trash'):
         db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
     db.execute('DELETE FROM projects WHERE id=?',(pid,))
 
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS files(project_id TEXT,path TEXT,content BLOB,revision
 CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY,project_id TEXT,path TEXT,content BLOB,revision INTEGER,author TEXT,created REAL);
 CREATE TABLE IF NOT EXISTS invites(token TEXT PRIMARY KEY,project_id TEXT,role TEXT,expires REAL);
 CREATE TABLE IF NOT EXISTS builds(project_id TEXT PRIMARY KEY,revision INTEGER,success INTEGER,log TEXT,pdf BLOB,seconds REAL,created REAL,engine TEXT);
+CREATE TABLE IF NOT EXISTS build_sources(project_id TEXT PRIMARY KEY,created REAL NOT NULL,source_map TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS lab_invites(id TEXT PRIMARY KEY,token TEXT UNIQUE,created REAL,expires REAL,used_by TEXT);
 CREATE TABLE IF NOT EXISTS approved_emails(email TEXT PRIMARY KEY);
@@ -174,6 +176,24 @@ AND b.last_url='https://github.com/'||s.repository||'/commit/'||b.last_commit'''
         db.execute('INSERT INTO projects VALUES(?,?,?,?,1,?)',(pid,title(name),owner,main,time.time()))
         db.execute('INSERT INTO members VALUES(?,?,?)',(pid,owner,'owner'))
         db.executemany('INSERT INTO files VALUES(?,?,?,1)',[(pid,p,c) for p,c in files.items()]); self.locate_project(db,owner,pid,folder); return pid
+    def project_location(self,db,user_id,pid):
+        row=db.execute('SELECT folder_id FROM project_locations WHERE user_id=? AND project_id=?',(user_id,pid)).fetchone()
+        return row['folder_id'] if row else None
+    def duplicate_project(self,db,project,user):
+        folder=self.project_location(db,user['id'],project['id'])
+        names={row['name'].casefold() for row in db.execute('''SELECT p.name FROM projects p JOIN members m ON p.id=m.project_id
+LEFT JOIN project_locations l ON l.project_id=p.id AND l.user_id=m.user_id
+WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=p.id)''',(user['id'],folder))}
+        number=1
+        while True:
+            suffix=' (copy)' if number==1 else ' (copy '+str(number)+')'
+            name=(project['name'][:120-len(suffix)].rstrip()+suffix).strip()
+            if name.casefold() not in names: break
+            number+=1
+        files={row['path']:row['content'] for row in db.execute('SELECT path,content FROM files WHERE project_id=?',(project['id'],))}
+        pid=self.new_project(db,user['id'],name,files,folder)
+        db.execute('UPDATE projects SET main=? WHERE id=?',(project['main'],pid))
+        return {'id':pid,'name':name,'folder':folder}
     def access(self,db,pid,user,write=False,owner=False):
         row=db.execute('SELECT p.*,m.role FROM projects p JOIN members m ON p.id=m.project_id WHERE p.id=? AND m.user_id=? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=p.id)',(pid,user['id'])).fetchone()
         if not row: raise Problem('Project not found.',404)
@@ -191,6 +211,27 @@ AND b.last_url='https://github.com/'||s.repository||'/commit/'||b.last_commit'''
             self.trash_checked=time.time()
         finally: self.trash_lock.release()
     def touch(self,db,pid): db.execute('UPDATE projects SET revision=revision+1,updated=? WHERE id=?',(time.time(),pid))
+    def delete_files(self,db,project,data):
+        paths,directories=data.get('paths',[]),data.get('directories',[])
+        if not isinstance(paths,list) or not isinstance(directories,list) or not 1<=len(paths)+len(directories)<=MAX_FILES:
+            raise Problem('Choose 1–1000 files or folders to delete.')
+        paths={safe_path(path) for path in paths};directories={safe_path(path) for path in directories}
+        if type(data.get('revision')) is not int: raise Problem('Provide the current project revision.')
+        if data['revision']!=project['revision']: raise Problem('Project changed. Reopen the delete menu to review the current files.',409)
+        pid=project['id'];files={row['path'] for row in db.execute('SELECT path FROM files WHERE project_id=?',(pid,))}
+        if paths-files: raise Problem('A selected file no longer exists.',404)
+        selected=set(paths)
+        for directory in directories:
+            children={path for path in files if path.startswith(directory+'/')}
+            if not children: raise Problem('A selected folder no longer exists.',404)
+            selected.update(children)
+        if project['main'] in selected: raise Problem('Choose another main document before deleting this file or folder.')
+        # Validate the complete selection before changing either source or history.
+        rows=[(pid,path) for path in sorted(selected)]
+        db.executemany('DELETE FROM history WHERE project_id=? AND path=?',rows)
+        db.executemany('DELETE FROM files WHERE project_id=? AND path=?',rows)
+        self.touch(db,pid)
+        return {'deleted':sorted(selected),'revision':project['revision']+1}
     def move_files(self,db,project,data):
         """Move a file or virtual directory atomically, including history and main."""
         pid=project['id'];source=safe_path(data.get('path'))
@@ -266,11 +307,16 @@ AND b.last_url='https://github.com/'||s.repository||'/commit/'||b.last_commit'''
                 except (OSError,ValueError): raise Problem('Compiler service is unavailable.',503)
             else: result=compile_project(files,project['main'])
             pdf=base64.b64decode(result['pdf']) if result.get('pdf') else None
+            mapping=result.pop('sourceMap',None) if pdf else None
+            created=time.time()
             with self.db() as db:
                 # Permission might have been revoked while the compiler ran.
                 self.access(db,pid,user,write=True)
-                db.execute('INSERT OR REPLACE INTO builds VALUES(?,?,?,?,?,?,?,?)',(pid,project['revision'],int(result['success']),result['log'],pdf,result['seconds'],time.time(),result['engine']))
-            return {**result,'pdf':bool(pdf),'revision':project['revision']}
+                db.execute('INSERT OR REPLACE INTO builds VALUES(?,?,?,?,?,?,?,?)',(pid,project['revision'],int(result['success']),result['log'],pdf,result['seconds'],created,result['engine']))
+                db.execute('DELETE FROM build_sources WHERE project_id=?',(pid,))
+                if mapping:
+                    db.execute('INSERT INTO build_sources VALUES(?,?,?)',(pid,created,json.dumps(mapping)))
+            return {**result,'pdf':bool(pdf),'sourceMap':bool(mapping),'revision':project['revision']}
         finally:
             with self.lock: self.jobs.discard(pid)
 
@@ -398,7 +444,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not public:
                     with self.app.db() as db: self.user(db)
                 large=(path=='/api/projects' and method=='POST') or (method=='PUT' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/file',path)) or (method=='POST' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/typst/[a-f0-9]{32}',path))
-                data=self.body(58*1024*1024 if large else (16384 if public else 65536))
+                bulk_delete=method=='POST' and re.fullmatch(r'/api/projects/[a-f0-9]{24}/delete-files',path)
+                data=self.body(256*1024 if bulk_delete else 58*1024*1024 if large else (16384 if public else 65536))
             self.body_deadline.cancel()
             result=self.route(method,path,urllib.parse.parse_qs(url.query),data)
             if result is not None: self.send(result)
@@ -498,9 +545,13 @@ class Handler(BaseHTTPRequestHandler):
                     target=dict(row)
             return app.backup(backup_match[1],user,app.backup_token(user,data.get('token')),shared_target=target)
         if method=='GET' and not path.startswith('/api/'):
-            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/edit-history.js':'edit-history.js','/typst-live.js':'typst-live.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
+            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/edit-history.js':'edit-history.js','/source-folding.js':'source-folding.js','/typst-live.js':'typst-live.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
+            allowed.update(PDF_ASSETS)
+            allowed.update({name:name[1:] for name in ('/pdf-viewer.html','/pdf-viewer.js','/pdf-viewer.css')})
             if path not in allowed: raise Problem('Not found.',404)
-            f=ROOT/'web'/allowed[path]; self.send(f.read_bytes(),kind=mimetypes.guess_type(f)[0] or 'text/plain'); return
+            f=ROOT/'web'/allowed[path]
+            headers={'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src 'self' blob: data:; worker-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'"} if path=='/pdf-viewer.html' else None
+            self.send(f.read_bytes(),kind=mimetypes.guess_type(f)[0] or 'application/octet-stream',headers=headers); return
         with app.db() as db:
             if path=='/api/session' and method=='GET':
                 try: user=self.user(db)
@@ -633,7 +684,10 @@ class Handler(BaseHTTPRequestHandler):
             if not match: raise Problem('Not found.',404)
             pid,action=match.groups()
             if method!='GET' and action!='compile': db.execute('BEGIN IMMEDIATE')
-            p=app.access(db,pid,user,write=method!='GET' and action!='folder')
+            # Duplicating needs read access, like downloading and reimporting source.
+            p=app.access(db,pid,user,write=method!='GET' and action not in ('folder','duplicate'))
+            if action=='duplicate' and method=='POST': return app.duplicate_project(db,p,user)
+            if action=='delete-files' and method=='POST': return app.delete_files(db,p,data)
             if action=='folder' and method=='PUT':
                 if 'folder' not in data: raise Problem('Choose a destination folder.')
                 app.locate_project(db,user['id'],pid,data['folder']);return {'ok':True}
@@ -657,6 +711,7 @@ class Handler(BaseHTTPRequestHandler):
                 return {**settings,'global_backup':app.shared_backup_status(db,p,user)}
             if action is None:
                 if method=='GET':
+                    p['folder']=app.project_location(db,user['id'],pid)
                     p['files']=[dict(x) for x in db.execute('SELECT path,length(content) AS size,revision FROM files WHERE project_id=? ORDER BY path',(pid,))]
                     b=db.execute('SELECT revision,success,seconds,created,engine FROM builds WHERE project_id=?',(pid,)).fetchone(); p['build']=dict(b) if b else None; return p
                 if method=='PUT':
@@ -717,10 +772,16 @@ class Handler(BaseHTTPRequestHandler):
             if action=='source.zip' and method=='GET':
                 files={x['path']:x['content'] for x in db.execute('SELECT path,content FROM files WHERE project_id=?',(pid,))}
                 self.send(pack_zip(files),kind='application/zip',headers={'Content-Disposition':export_disposition(p['name'],'.zip')}); return
+            if action=='synctex' and method=='GET':
+                row=db.execute('SELECT b.created,b.revision,s.source_map FROM builds b LEFT JOIN build_sources s ON s.project_id=b.project_id AND s.created=b.created WHERE b.project_id=?',(pid,)).fetchone()
+                if not row or not row['source_map']: return {'files':[],'pages':{}}
+                if query.get('v',[None])[0]!=str(row['created']): raise Problem('The preview changed. Wait for the latest PDF.',409)
+                return {**json.loads(row['source_map']),'revision':row['revision']}
             if action in ('pdf','log') and method=='GET':
                 row=db.execute('SELECT * FROM builds WHERE project_id=?',(pid,)).fetchone()
                 if not row or (action=='pdf' and not row['pdf']): raise Problem('Compile successfully to generate a PDF.',404)
                 if action=='log': return {'log':row['log'],'success':bool(row['success']),'revision':row['revision']}
+                if 'v' in query and query['v'][0]!=str(row['created']): raise Problem('The preview changed. Wait for the latest PDF.',409)
                 self.send(row['pdf'],kind='application/pdf',headers={'Content-Disposition':export_disposition(p['name'],'.pdf','download' in query)}); return
             if action=='members':
                 if method=='GET': return {'members':[dict(x) for x in db.execute('SELECT u.id,u.email,u.name,m.role FROM members m JOIN users u ON u.id=m.user_id WHERE m.project_id=?',(pid,))]}

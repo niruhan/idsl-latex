@@ -1,6 +1,7 @@
 """Validation, project archives, and bounded LaTeX/Typst compilation."""
 import base64, io, json, os, re, signal, subprocess, tempfile, threading, time, zipfile
 from pathlib import Path, PurePosixPath
+from source_map import read_source_map
 
 MAX_FILE = 8 * 1024 * 1024
 MAX_PROJECT = 40 * 1024 * 1024
@@ -86,7 +87,7 @@ def compile_project(files, main):
                 command = [os.getenv('TECTONIC_BIN','tectonic'), '--untrusted', '--keep-logs', '--synctex', '--outdir', str(out), main]
             elif engine == 'pdflatex':
                 # -norc rejects project .latexmkrc, and no-shell-escape rejects external commands.
-                command = ['latexmk', '-norc', '-pdf', '-interaction=nonstopmode', '-halt-on-error', '-no-shell-escape', '-outdir='+str(out), main]
+                command = ['latexmk', '-norc', '-pdf', '-synctex=1', '-interaction=nonstopmode', '-halt-on-error', '-no-shell-escape', '-outdir='+str(out), main]
             else: raise Problem('Unknown LATEX_ENGINE.', 503)
             env = {k:v for k,v in os.environ.items() if k in ('PATH','HOME','XDG_CACHE_HOME','LANG','SSL_CERT_FILE','SSL_CERT_DIR','FONTCONFIG_PATH','TEXFORMATS','TYPST_PACKAGE_PATH','TYPST_PACKAGE_CACHE_PATH')}
             # Local builds use a dedicated compiler home, never the account's configuration.
@@ -107,8 +108,14 @@ def compile_project(files, main):
                 output = log.read(128000).decode('utf-8',errors='replace')
             pdf = out / (PurePosixPath(main).stem+'.pdf')
             ok = not stopped and proc.returncode == 0 and pdf.is_file() and pdf.stat().st_size <= MAX_FILE
+            mapping = None
+            if ok and engine != 'typst':
+                stem = PurePosixPath(main).stem
+                mapping = read_source_map(out / (stem + '.synctex.gz'), root, files)
+                if mapping is None:
+                    mapping = read_source_map(out / (stem + '.synctex'), root, files)
             return {'success':ok,'log':('Build stopped: time or output limit reached.\n' if stopped else '')+output,
-                    'seconds':round(time.monotonic()-start,2),'pdf':base64.b64encode(pdf.read_bytes()).decode() if ok else None,'engine':engine}
+                    'seconds':round(time.monotonic()-start,2),'pdf':base64.b64encode(pdf.read_bytes()).decode() if ok else None,'engine':engine,'sourceMap':mapping}
     finally: BUILD_LOCK.release()
 
 SAMPLE = {

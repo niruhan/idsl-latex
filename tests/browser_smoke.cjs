@@ -50,11 +50,13 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       return result;
     }
     await compile();
-    const pdfResponse = await context.request.get(origin + await page.locator('#pdfFrame').getAttribute('src'));
+    const previewUrl=new URL(await page.locator('#pdfFrame').getAttribute('src'),origin);
+    const pdfResponse = await context.request.get(origin+'/api/projects/'+previewUrl.searchParams.get('project')+'/pdf?v='+previewUrl.searchParams.get('v'));
     assert.equal(pdfResponse.status(), 200);
     const pdf = await pdfResponse.body();
     assert.equal(pdf.subarray(0, 4).toString(), '%PDF');
     fs.writeFileSync(path.join(output, 'browser-compiled.pdf'), pdf);
+    await page.frameLocator('#pdfFrame').locator('.pdf-page[data-rendered=true]').first().waitFor();
     const pdfDownload = page.waitForEvent('download');
     await page.locator('#downloadButton').click();
     const exported=await pdfDownload;assert.equal(exported.suggestedFilename(),(await page.locator('#projectTitle').textContent())+'.pdf');

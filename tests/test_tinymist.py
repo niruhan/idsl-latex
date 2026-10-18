@@ -1,10 +1,43 @@
 import os
 from pathlib import Path
 import sys
+import tempfile
+import threading
 import time
 import unittest
 
 import test_app
+from typst_service import TypstSession
+
+
+class SourceMappingTests(unittest.TestCase):
+    def test_preview_pairs_and_lsp_ranges_keep_the_source_position(self):
+        with tempfile.TemporaryDirectory() as folder:
+            session = TypstSession.__new__(TypstSession)
+            session.root = Path(folder).resolve()
+            path = 'sections/field notes.typ'
+            session.files = {path: b'Example'}
+            session.lock, session.event, session.jump = threading.RLock(), 0, None
+            replies = []
+            session._send = replies.append
+            for method, location in [
+                ('tinymist/preview/scrollSource', {'filepath': str(session.root / path), 'start': [65, 7], 'end': [65, 12]}),
+                ('window/showDocument', {'uri': (session.root / path).as_uri(), 'selection': {'start': {'line': 65, 'character': 7}, 'end': {'line': 65, 'character': 12}}}),
+            ]:
+                with self.subTest(method=method):
+                    session._notification({'id': 1, 'method': method, 'params': location})
+                    self.assertEqual(session.jump['path'], path)
+                    self.assertEqual(session.jump['range'], {'start': {'line': 65, 'character': 7}, 'end': {'line': 65, 'character': 12}})
+                    self.assertEqual(replies[-1]['result'], {'success': True})
+            session._notification({'method': 'tinymist/preview/scrollSource', 'params': {'filepath': str(session.root / path), 'start': [65, 7]}})
+            self.assertEqual(session.jump['range'], {'start': {'line': 65, 'character': 7}, 'end': {'line': 65, 'character': 7}})
+            event = session.event
+            for target in (session.root / '../outside.typ', session.root / 'missing.typ'):
+                session._notification({'method': 'tinymist/preview/scrollSource', 'params': {'filepath': str(target), 'start': [65, 7]}})
+                self.assertEqual(session.event, event, 'Only existing files in this project can be opened')
+            for start in ([65], [-1, 7], [True, 7], '65:7'):
+                session._notification({'method': 'tinymist/preview/scrollSource', 'params': {'filepath': str(session.root / path), 'start': start}})
+                self.assertEqual(session.event, event, 'Malformed positions must not jump to the wrong source')
 
 
 @unittest.skipUnless(sys.platform == 'darwin' and os.access(os.getenv('TINYMIST_BIN', ''), os.X_OK), 'Native Tinymist is not installed')
@@ -84,6 +117,16 @@ class TinymistTests(unittest.TestCase):
             time.sleep(.1)
         self.assertIn('22', str(self.query('hover')), 'A saved imported file must invalidate the persistent compiler cache')
         self.assertEqual(self.session.process.pid, process)
+        # Bulk deletion closes overlays and removes dependencies from the mirror.
+        self.session.change('section.typ','#let watched = 22',1)
+        revision = self.owner.call(self.base)[1]['revision']
+        self.assertEqual(self.owner.call(self.base+'/delete-files','POST',{'paths':['section.typ'],'revision':revision})[0],200)
+        self.owner.call(self.endpoint)
+        self.assertNotIn('section.typ',self.session.files)
+        self.assertNotIn('section.typ',self.session.opened)
+        self.assertFalse((root/'section.typ').exists())
+        self.change(self.source,6);self.wait_status('CompileSuccess')
+        self.assertEqual(self.session.process.pid,process)
         html = self.owner.call(result['preview'])
         self.assertEqual(html[0], 200)
         self.assertIn('window.WebSocket=class', html[1].decode())

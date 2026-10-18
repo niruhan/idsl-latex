@@ -62,12 +62,40 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const zipDownload=page.waitForEvent('download');await editorOption(page,'exportSourceButton');const zip=await zipDownload;assert.equal(zip.suggestedFilename(),'Live research notebook.zip');
   const afterZip=await page.waitForResponse(response=>response.url().endsWith(endpoint)&&response.request().method()==='GET');assert.equal(afterZip.status(),200,'Source ZIP export must keep the live session running');assert.equal(sessions.length,1,'Exports must preserve the existing worker, not reconnect it');
   await frame.locator('#typst-app svg').first().waitFor({state:'visible'});console.log('PASS PDF/source downloads preserve the live session, visible preview, subsequent edits and LSP');
+  // LSP positions use original lines even when earlier source is folded.
+  const foldingSource='= Hidden section\nHidden paragraph.\n= Definitions\n#let answer = 210\n= Query\nThe answer is #answer.\n';await page.locator('#code').fill(foldingSource);await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Live ·'));
+  await page.locator('button.fold-toggle[data-line="1"]').click();await page.locator('button.fold-toggle[data-line="3"]').click();await page.locator('#code').evaluate(area=>{const pos=area.value.lastIndexOf('answer')+2;area.setSelectionRange(pos,pos);});await page.locator('#code').press('Control+Shift+Space');await page.locator('#typstDocumentation').getByText(/210/).waitFor();
+  await page.locator('#code').press('F12');await page.waitForFunction(()=>document.querySelector('#code').value.includes('#let answer = 210'));assert.equal((await page.locator('#code').inputValue()).includes('Hidden paragraph'),false);assert.equal(await page.locator('button.fold-toggle[data-line="3"]').getAttribute('aria-expanded'),'true');
+  await page.locator('button.fold-toggle[data-line="5"]').click();await frame.locator('.typst-text').last().click({position:{x:3,y:3}});await page.waitForFunction(()=>document.querySelector('#code').value.includes('The answer is #answer.')&&document.activeElement.id==='code');assert.equal(await page.locator('button.fold-toggle[data-line="5"]').getAttribute('aria-expanded'),'true');assert.equal(await page.locator('#typstFrame').getAttribute('src'),initialSrc);assert.equal(sessions.length,1);await editorOption(page,'unfoldAllSource');assert.equal(await page.locator('#code').inputValue(),foldingSource);
+  console.log('PASS folded Typst source retains original LSP positions, go-to-definition and preview clicks reveal hidden blocks, and the live worker stays connected');
   // A leave warning that the user cancels must preserve the compiler as well.
   await page.locator('#code').fill(source.replace('42','168'));
   page.once('dialog',dialog=>{assert.equal(dialog.type(),'beforeunload');dialog.dismiss();});
   await assert.rejects(page.goto(origin+'/'),/ERR_ABORTED/);assert.equal(new URL(page.url()).hash,'#project='+pid);
   const afterCancelledLeave=await page.waitForResponse(response=>response.url().endsWith(endpoint)&&response.request().method()==='GET');assert.equal(afterCancelledLeave.status(),200);assert.equal(sessions.length,1);await frame.locator('#typst-app svg').first().waitFor({state:'visible'});
   console.log('PASS cancelled page navigation preserves the active preview session');
+  // A preview click must also follow mappings into an included source file.
+  const sectionPath='sections/field notes.typ',section='// Included source fixture\n'+Array.from({length:64},(_,index)=>'// Context '+index).join('\n')+'\nA paragraph from the included file.\n',previousTextCount=await frame.locator('.typst-text').count();
+  await api(base+'/file','PUT',{path:sectionPath,content:section,revision:0});
+  await page.locator('#code').fill(source+'\n#include "'+sectionPath+'"\n');await page.locator('#code').press('Control+s');
+  await page.locator('.tree-folder[title="sections"]').waitFor();
+  await page.locator('.tree-folder[title="sections"]').click();
+  assert.equal(await page.locator('.tree-file[title="'+sectionPath+'"]').isVisible(),false);
+  await page.waitForFunction(count=>document.querySelector('#typstFrame').contentDocument.querySelectorAll('.typst-text').length>count,previousTextCount);
+  await frame.locator('.typst-text').last().click({position:{x:3,y:3}});
+  await page.waitForFunction(path=>document.querySelector('#filePath').textContent===path,sectionPath);
+  assert.equal(await page.locator('#code').inputValue(),section);
+  try{await page.waitForFunction(()=>document.activeElement.id==='code'&&document.querySelector('#code').selectionStart>=document.querySelector('#code').value.indexOf('A paragraph'));}
+  catch(error){console.error('Preview source mapping:',(await api(endpoint)).jump,await page.locator('#code').evaluate(area=>({active:document.activeElement.id,start:area.selectionStart,end:area.selectionEnd,top:area.scrollTop})));throw error;}
+  assert.equal(await page.locator('.tree-file[title="'+sectionPath+'"]').isVisible(),true,'The included file is revealed inside its collapsed folder');
+  assert.equal(await page.locator('#code').evaluate(area=>area.scrollTop>0),true,'Scroll the source to the mapped paragraph');
+  assert.equal(await page.locator('#typstFrame').getAttribute('src'),initialSrc);assert.equal(sessions.length,1);
+  await page.locator('#code').fill(section+'An unsaved note.\n');
+  await frame.locator('.typst-text').first().click({position:{x:3,y:3}});
+  await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='main.typ'&&document.activeElement.id==='code');
+  assert.equal((await api(base+'/file?path='+encodeURIComponent(sectionPath))).content,section+'An unsaved note.\n','Preview navigation saves the file being left');
+  assert.equal(await page.locator('#code').evaluate(area=>area.selectionStart<=area.value.indexOf('\n')),true);
+  console.log('PASS preview clicks open included files, reveal collapsed folders, scroll to mapped source and save edits before navigating back');
   assert.equal(await page.locator('#visualTab,.format-toolbar,#typstTools,#typstPreviewSwitch,#showPdfPreview').count(),0);assert.equal(await page.locator('#pdfFrame').isHidden(),true);assert.equal(await page.locator('#pdfFrame').getAttribute('src'),null);assert.equal(await page.locator('#openPdfButton').isHidden(),true);
   await page.locator('.tree-file[title="main.typ"]').click({button:'right'});await page.locator('#renameFile').click();await page.locator('#renameFilePath').fill('renamed.typ');await page.locator('#confirmRenameFile').click();
   await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='renamed.typ'&&document.querySelector('#buildStatus').textContent.startsWith('Live ·'));

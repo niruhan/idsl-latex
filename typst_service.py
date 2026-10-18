@@ -21,6 +21,24 @@ import urllib.parse
 from core import MAX_FILE, MAX_PROJECT, Problem, safe_path
 
 
+def source_range(params):
+    """Normalize preview [line, column] pairs and LSP selection objects."""
+    selection = params.get('selection') or params
+    if not isinstance(selection, dict):
+        return None
+
+    def position(value):
+        if isinstance(value, list) and len(value) == 2:
+            value = dict(zip(('line', 'character'), value))
+        if isinstance(value, dict) and all(type(value.get(key)) is int and
+                0 <= value[key] <= MAX_FILE for key in ('line', 'character')):
+            return {key: value[key] for key in ('line', 'character')}
+
+    start = position(selection.get('start', {'line': 0, 'character': 0}))
+    end = position(selection.get('end', start))
+    return {'start': start, 'end': end} if start is not None and end is not None else None
+
+
 class TypstSession:
     def __init__(self, manager, user_id, project, files):
         self.manager, self.user_id, self.pid = manager, user_id, project['id']
@@ -170,10 +188,11 @@ class TypstSession:
                 path = self.relative(params.get('uri'))
                 if not path and params.get('filepath'):
                     path = self.relative(Path(params['filepath']).as_uri())
-                if path:
+                selection = source_range(params)
+                if path and selection:
                     self.event += 1
                     self.jump = {'id': self.event, 'path': path,
-                        'range': params.get('selection') or {'start': params.get('start') or {'line': 0, 'character': 0}}}
+                        'range': selection}
                     result = {'success': True}
             elif method == 'workspace/configuration':
                 result = [self.config for _ in params.get('items', [])]

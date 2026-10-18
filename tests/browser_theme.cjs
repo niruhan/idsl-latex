@@ -46,7 +46,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   }
   await page.evaluate(()=>{window.labtexTheme.setPalette('forest');window.labtexTheme.set('dark');});await page.locator('#code').press('ArrowRight');
   console.log('PASS selected text remains opaque and readable in all five light/dark palettes without changing source');
-  const pdfUrl=origin+pdf.split('#')[0],digest=async()=>crypto.createHash('sha256').update(await(await context.request.get(pdfUrl)).body()).digest('hex'),originalDigest=await digest();
+  const previewUrl=new URL(pdf,origin),pdfUrl=origin+'/api/projects/'+previewUrl.searchParams.get('project')+'/pdf?v='+previewUrl.searchParams.get('v'),digest=async()=>crypto.createHash('sha256').update(await(await context.request.get(pdfUrl)).body()).digest('hex'),originalDigest=await digest();
   assert.equal(await page.locator('#pdfThemeButton').getAttribute('aria-pressed'),'false');
   await editorOption(page,'pdfThemeButton');assert.equal(await page.locator('#pdfThemeButton').getAttribute('aria-pressed'),'true');await resolved('dark');
   assert.notEqual(await page.locator('#pdfFrame').evaluate(el=>getComputedStyle(el).filter),'none');

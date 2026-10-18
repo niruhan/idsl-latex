@@ -38,7 +38,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await entry(beta).dragTo(directory(course));await page.waitForFunction(id=>!document.querySelector('.project-entry[data-project="'+id+'"]'),beta);
   assert.equal((await read('/api/projects')).projects.find(project=>project.id===beta).folder,course);
   await enter(week);await entry(alpha).waitFor();await page.reload();await entry(alpha).waitFor();
-  assert.deepEqual(await read('/api/projects/'+alpha),before,'Organizing must leave source, revision, permissions and build metadata unchanged');
+  assert.deepEqual(await read('/api/projects/'+alpha),{...before,folder:week},'Only the per-account folder changes; source, revision, permissions and build metadata stay unchanged');
   console.log('PASS nested folders, breadcrumbs, move dialog, drag/drop, reload persistence and unchanged project content');
 
   await root();await page.locator('#projectSearch').fill('Analysis notebook');await entry(alpha).waitFor();
@@ -49,11 +49,11 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await page.locator('#createProject').click();await page.locator('#newProjectForm input[name=name]').fill('Weekly questions');await page.locator('#newProjectForm select[name=template]').selectOption('false');
   await page.locator('#newProjectForm button').click();await page.locator('#workspace').waitFor({state:'visible'});
   const created=new URL(page.url()).hash.split('project=')[1];assert.equal((await read('/api/projects')).projects.find(project=>project.id===created).folder,week);
-  await page.locator('#projectsNavButton').click();await entry(created).waitFor();assert.ok(page.url().endsWith('&folder='+week));
+  await page.locator('#projectsNavButton').click();await page.waitForURL('**/#projects');await page.locator('#folderLocation').waitFor({state:'hidden'});await enter(week);await entry(created).waitFor();
   const zip=await context.request.get(origin+'/api/projects/'+alpha+'/source.zip');assert.equal(zip.status(),200);
   await page.locator('#importZip').setInputFiles({name:'Imported course notes.zip',mimeType:'application/zip',buffer:await zip.body()});await page.locator('#workspace').waitFor({state:'visible'});
   const imported=new URL(page.url()).hash.split('project=')[1];assert.equal((await read('/api/projects')).projects.find(project=>project.id===imported).folder,week);
-  await page.locator('#projectsNavButton').click();await entry(imported).waitFor();
+  await page.locator('#projectsNavButton').click();await page.waitForURL('**/#projects');await page.locator('#folderLocation').waitFor({state:'hidden'});await enter(week);await entry(imported).waitFor();
   console.log('PASS search across folders, global format filter, Back/Forward and create/import into the current folder');
 
   await page.locator('#manageProjectFolder').click();assert.equal(await page.locator('#deleteProjectFolder').isDisabled(),true);

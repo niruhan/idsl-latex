@@ -1,5 +1,5 @@
 // Tinymist language features and persistent preview, using authenticated app routes.
-export function createTypstLive({api,state,setText,navigate,toast}){
+export function createTypstLive({api,state,setText,navigate,toast,sourceSelection,selectSource,visibleLine}){
  const $=id=>document.getElementById(id);
  let session=null,project=null,mainDocument=null,starting=false,generation=0,timer,pollTimer,completionTimer,flight=null,dirty=false,sequence=0,lastJump=0,lastState=null,capabilities=null,closing=Promise.resolve(),lastError='',unavailable='';
  let choices=[],choice=0,completionSource=null;
@@ -12,7 +12,7 @@ export function createTypstLive({api,state,setText,navigate,toast}){
  const active=()=>Boolean(session&&state().project?.id===project);
  const isTypstProject=()=>Boolean(state().project?.main.endsWith('.typ'));
  const endpoint=()=>'/api/projects/'+project+'/typst/'+session;
- const position=()=>{const text=$('code').value.slice(0,$('code').selectionStart),lines=text.split('\n');return {line:lines.length-1,character:lines.at(-1).length};};
+ const position=()=>{const text=state().text.slice(0,sourceSelection().start),lines=text.split('\n');return {line:lines.length-1,character:lines.at(-1).length};};
  const offset=(text,pos)=>{const lines=text.split('\n'),line=Math.min(Math.max(0,pos?.line||0),lines.length-1);return lines.slice(0,line).reduce((sum,value)=>sum+value.length+1,0)+Math.min(lines[line].length,Math.max(0,pos?.character||0));};
  function languageFile(){return active()&&state().file?.path.endsWith('.typ')&&state().mode==='source';}
  function controls(){
@@ -69,7 +69,7 @@ export function createTypstLive({api,state,setText,navigate,toast}){
   if(active()&&state().project.main!==mainDocument){open().catch(report);return;}
   controls();closeCompletion();clearTimeout(completionTimer);if(!active()||state().file?.content===null)return;
   dirty=true;clearTimeout(timer);timer=setTimeout(()=>flush().catch(error=>report(error)),45);
-  if(languageFile()&&/(?:#[\w]*|\.[\w]*|@[\w]*|<[\w-]*)$/.test($('code').value.slice(0,$('code').selectionStart)))completionTimer=setTimeout(()=>complete(false).catch(()=>{}),220);
+  if(languageFile()&&/(?:#[\w]*|\.[\w]*|@[\w]*|<[\w-]*)$/.test(state().text.slice(0,sourceSelection().start)))completionTimer=setTimeout(()=>complete(false).catch(()=>{}),220);
  }
  function report(error){toast(error.message);}
  async function flush(){
@@ -92,8 +92,8 @@ export function createTypstLive({api,state,setText,navigate,toast}){
  }
  function selectedChoice(){[...completions.children].forEach((button,index)=>{button.setAttribute('aria-selected',String(index===choice));if(index===choice){$('code').setAttribute('aria-activedescendant',button.id);button.scrollIntoView({block:'nearest'});}});}
  async function complete(manual=true){
-  if(!languageFile())return;const source=state().text,path=state().file.path,caret=$('code').selectionStart;
-  const result=await query('completion');if(!result||state().text!==source||state().file?.path!==path||$('code').selectionStart!==caret)return;
+  if(!languageFile())return;const source=state().text,path=state().file.path,caret=sourceSelection().start;
+  const result=await query('completion');if(!result||state().text!==source||state().file?.path!==path||sourceSelection().start!==caret)return;
   choices=result;choice=0;completionSource={text:source,path,caret};completions.replaceChildren();
   if(!choices.length){if(manual)toast('No completions at this cursor position.');return;}
   for(const [index,item] of choices.entries()){
@@ -101,7 +101,7 @@ export function createTypstLive({api,state,setText,navigate,toast}){
    button.addEventListener('pointerdown',event=>{event.preventDefault();choice=index;applyCompletion();});completions.append(button);
   }
   const lineHeight=parseFloat(getComputedStyle($('code')).lineHeight)||23;
-  completions.style.top=Math.max(4,Math.min($('code').clientHeight-180,(position().line+1)*lineHeight-$('code').scrollTop+15))+'px';completions.hidden=false;
+  completions.style.top=Math.max(4,Math.min($('code').clientHeight-180,(visibleLine()+1)*lineHeight-$('code').scrollTop+15))+'px';completions.hidden=false;
   $('code').setAttribute('aria-controls',completions.id);$('code').setAttribute('aria-expanded','true');selectedChoice();
  }
  function applyEdits(text,edits){
@@ -135,7 +135,7 @@ export function createTypstLive({api,state,setText,navigate,toast}){
   const edits=additional.map(change=>({start:offset(original,change.range.start),end:offset(original,change.range.end),text:change.newText}));
   edits.push({start,end,text:expanded.text});edits.sort((a,b)=>b.start-a.start);let text=original;
   for(const change of edits)text=text.slice(0,change.start)+change.text+text.slice(change.end);
-  closeCompletion();setText(text,false,{kind:'completion',after:{mode:'source',start:start+shift+expanded.selection.start,end:start+shift+expanded.selection.end}});$('code').focus();$('code').setSelectionRange(start+shift+expanded.selection.start,start+shift+expanded.selection.end);
+  const after={mode:'source',start:start+shift+expanded.selection.start,end:start+shift+expanded.selection.end};closeCompletion();setText(text,false,{kind:'completion',after});selectSource(after);
  }
  async function documentation(){
   const result=await query('hover'),content=result?.contents;

@@ -49,7 +49,7 @@ class TrashTests(unittest.TestCase):
         self.assertEqual(self.owner.call(endpoint, 'DELETE', {'name':project['name']})[0], 200)
         self.assertEqual(self.owner.call(endpoint, 'POST', {})[0], 404)
         with self.app.db() as db:
-            for table in ('files','history','members','invites','builds','project_backups','shared_project_backups','project_locations','project_trash'):
+            for table in ('files','history','members','invites','builds','build_sources','project_backups','shared_project_backups','project_locations','project_trash'):
                 self.assertEqual(db.execute('SELECT COUNT(*) FROM '+table+' WHERE project_id=?', (self.pid,)).fetchone()[0], 0)
             self.assertIsNone(db.execute('SELECT 1 FROM projects WHERE id=?', (self.pid,)).fetchone())
 

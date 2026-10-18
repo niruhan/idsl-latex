@@ -41,5 +41,5 @@ export function createEditHistory(){
   to.push(entry);active.text=text;active.time=0;
   return {text,selection:redo?entry.after:entry.before,start:entry.edits[0].start};
  }
- return {select,record,step,breakGroup(){if(active)active.time=0;}};
+ return {select,record,step,forget(removed){files.delete(removed);if(key===removed){active=null;key=null;}},breakGroup(){if(active)active.time=0;}};
 }

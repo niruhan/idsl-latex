@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Fail closed on common private files/identifiers in Git's tracked release tree."""
 import ipaddress
+import hashlib
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -21,6 +23,10 @@ UPSTREAM_CONTACTS = {
 
 
 def main():
+    vendor_root = ROOT / 'web/vendor/pdfjs'
+    vendor = json.loads((vendor_root / 'UPSTREAM.json').read_text())
+    if vendor['version'] != '6.4.299' or vendor['sha256'] != 'f2245eb7ef3f674c872fe568a177bfec15874f5c034613e55d8e307f93ebd86d':
+        raise SystemExit('Review the pinned PDF.js release before changing its vendor manifest.')
     raw = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT)
     names = [name for name in raw.decode().split('\0') if name]
     if not names:
@@ -33,6 +39,11 @@ def main():
             continue
         if path.is_symlink() or not path.is_file():
             failures.append((name, 'symlink or missing file'))
+            continue
+        if name.startswith('web/vendor/pdfjs/') and name!='web/vendor/pdfjs/UPSTREAM.json':
+            relative = name.removeprefix('web/vendor/pdfjs/')
+            if hashlib.sha256(path.read_bytes()).hexdigest()!=vendor['files'].get(relative):
+                failures.append((name, 'upstream PDF.js checksum mismatch'))
             continue
         if path.stat().st_size > 1024 * 1024:
             failures.append((name, 'unexpected large release file'))
