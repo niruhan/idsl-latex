@@ -751,19 +751,47 @@ async function saveGitHubToken(prefix){
   }else S.githubToken=token;
  }
 }
-async function allBackupsDialog(){
- if(S.project||!await save())return;const [defaults,credential]=await Promise.all([api('/api/backup-settings'),api('/api/github-token')]);
+let allBackupFlight=null;
+function pushAllBackups(){
+ if(allBackupFlight)return allBackupFlight;
+ const button=$('homeBackupButton');button.disabled=true;button.setAttribute('aria-busy','true');
+ allBackupFlight=api('/api/backups','POST',{token:S.githubToken,sharedOnly:true}).finally(()=>{allBackupFlight=null;button.disabled=false;button.removeAttribute('aria-busy');});
+ return allBackupFlight;
+}
+function renderAllBackupResults(result,response){
+ result.replaceChildren();result.classList.remove('error');
+ if(!response.results.length)result.textContent='You do not own any projects to back up.';
+ for(const item of response.results){const line=document.createElement('div');if(item.error){line.textContent=item.name+': '+item.error;result.classList.add('error');}else{const link=document.createElement('a');link.href=item.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=item.name+': '+(item.changed?'Snapshot saved':'Already up to date')+' → '+item.repository+(item.folder?'/'+item.folder:'');line.append(link);}result.append(line);}
+}
+async function quickGlobalBackup(){
+ const button=$('homeBackupButton'),uid=S.user?.id;if(S.project||!Home.visible||button.disabled)return;
+ closeAccountMenu();button.disabled=true;button.setAttribute('aria-busy','true');
+ try{
+  const [defaults,credential]=await Promise.all([api('/api/backup-settings'),api('/api/github-token')]);
+  if(S.user?.id!==uid||S.project||!Home.visible)return;S.githubSaved=credential.saved;
+  if(!defaults.repository||!(S.githubToken||credential.saved)){await allBackupsDialog();return;}
+  toast('Backing up all projects…');const response=await pushAllBackups();if(S.user?.id!==uid)return;
+  const failed=response.results.filter(item=>item.error).length;
+  if(failed){if(!S.project&&Home.visible)await allBackupsDialog({response});else toast('GitHub backup: '+failed+' project(s) failed. Open GitHub backups for details.');}
+  else toast(!response.results.length?'You do not own any projects to back up.':response.results.some(item=>item.changed)?'Global GitHub backup updated.':'Global GitHub backup is up to date.');
+ }catch(error){if(S.user?.id===uid){if(!S.project&&Home.visible)await allBackupsDialog({error:error.message});else fail(error);}}
+ finally{button.disabled=Boolean(allBackupFlight);if(!allBackupFlight)button.removeAttribute('aria-busy');}
+}
+action('homeBackupButton',quickGlobalBackup);
+async function allBackupsDialog(initial={}){
+ const uid=S.user?.id;if(S.project||!await save())return;const [defaults,credential]=await Promise.all([api('/api/backup-settings'),api('/api/github-token')]);
+ if(S.user?.id!==uid||S.project||!Home.visible)return;
  modal('Back up all projects',`<p>Back up every project you own into one GitHub repository. Each project gets its own folder under projects/, named after the project. Duplicate names receive a numbered suffix. Shared projects owned by someone else are excluded. Use a private repository for private documents.</p><form id="allBackupsForm"><label>Shared GitHub repository<input id="allBackupRepo" placeholder="your-name/research-documents" value="${esc(defaults.repository)}" required></label><label>Branch<input id="allBackupBranch" placeholder="Default branch" value="${esc(defaults.branch)}"></label><label>GitHub access token<input id="allBackupToken" type="password" autocomplete="off" placeholder="Fine-grained token with Contents read/write"></label>${tokenControls('allBackup',credential)}<p class="hint">Create the repository on GitHub first. Project-specific repository settings are preserved.</p><div class="actions"><button id="saveAllBackupSettings" type="button" class="outline">Save settings</button><button id="runAllBackups" class="primary">Back up all to this repository</button></div></form><div id="allBackupResult" class="backup-result" role="status">Ready to back up your owned projects.</div>`);
  bindTokenControls('allBackup',credential);
+ if(initial.response)renderAllBackupResults($('allBackupResult'),initial.response);
+ if(initial.error){$('allBackupResult').textContent=initial.error;$('allBackupResult').classList.add('error');}
  async function settings(){await api('/api/backup-settings','PUT',{repository:$('allBackupRepo').value,branch:$('allBackupBranch').value});await saveGitHubToken('allBackup');}
  action('saveAllBackupSettings',async()=>{await settings();$('allBackupResult').textContent='Shared repository settings saved.';});
  $('allBackupsForm').addEventListener('submit',async event=>{
-  event.preventDefault();const button=$('runAllBackups'),saveButton=$('saveAllBackupSettings'),result=$('allBackupResult');if(button.disabled)return;button.disabled=true;saveButton.disabled=true;result.classList.remove('error');
+  event.preventDefault();const button=$('runAllBackups'),saveButton=$('saveAllBackupSettings'),result=$('allBackupResult');if(button.disabled)return;if(allBackupFlight){toast('A global GitHub backup is already running.');return;}button.disabled=true;saveButton.disabled=true;result.classList.remove('error');
   try{
    await settings();if(!(S.githubToken||S.githubSaved))throw Error('Enter your GitHub token first.');result.textContent='Backing up your owned projects…';
-   const response=await api('/api/backups','POST',{token:S.githubToken,sharedOnly:true});result.replaceChildren();
-   if(!response.results.length)result.textContent='You do not own any projects to back up.';
-   for(const item of response.results){const line=document.createElement('div');if(item.error){line.textContent=item.name+': '+item.error;result.classList.add('error');}else{const link=document.createElement('a');link.href=item.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=item.name+': '+(item.changed?'Snapshot saved':'Already up to date')+' → '+item.repository+(item.folder?'/'+item.folder:'');line.append(link);}result.append(line);}
+   const response=await pushAllBackups();renderAllBackupResults(result,response);
   }catch(error){result.textContent=error.message;result.classList.add('error');}finally{button.disabled=false;saveButton.disabled=false;}
  });
 }

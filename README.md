@@ -23,7 +23,7 @@ All screenshots use a temporary database, fictional demo accounts, and starter d
 - **PDF preview + export:** manual PDF compilation and automatic LaTeX builds, clickable errors, project-named PDF/ZIP downloads, and an independent **Dark PDF** preview toggle.
 - **Sharing:** invite coauthors to individual projects with editor or view-only access.
 - **Autosave + history:** recover browser drafts, restore saved file versions, and detect conflicting edits.
-- **GitHub backups:** keep all projects in named folders in one repository or use a separate repository per document; saved tokens, an all-project backup menu, and optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
+- **GitHub backups:** keep all projects in named folders in one repository or use a separate repository per document; saved tokens, a one-click global backup button beside the explorer theme toggle, and optional backups after saving while the tab is open. [Setup →](docs/LOCAL.md#github-backups)
 - **Import/export:** import project ZIPs (including Overleaf exports), upload assets, and download complete source ZIPs.
 - **Themes:** choose IDSL Forest, Western Purple, Nord, GitHub, or Solarized under **Account → Themes & appearance**; switch light/dark with one click on the sun/moon button.
 - **Ready-to-use templates:** Western slides and NeurIPS are featured; **More templates** offers a Typst introduction, classic LaTeX article, Western thesis scaffold, coursework, Beamer slides, and academic CV.
