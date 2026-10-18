@@ -11,7 +11,14 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
  const context=await browser.newContext({viewport:{width:1500,height:960},colorScheme:'light'});
  const page=await context.newPage();page.setDefaultTimeout(20000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  async function api(url,method='GET',data){const response=await context.request.fetch(origin+url,{method,headers:{Origin:origin},data});assert.equal(response.ok(),true,await response.text());return response.json();}
- async function capture(name){if(await page.locator('#workspace').isVisible())await page.waitForTimeout(1000);await page.locator('#toast').waitFor({state:'hidden',timeout:10000});await page.screenshot({path:path.join(output,name),animations:'disabled',fullPage:true});console.log('Captured '+name);}
+ async function capture(name){
+  if(await page.locator('#workspace').isVisible()){
+   await page.waitForFunction(()=>!document.querySelector('#workspace').inert);
+   if(await page.locator('#pdfFrame').isVisible())await page.frameLocator('#pdfFrame').locator('.pdf-page[data-rendered="true"] canvas').first().waitFor({state:'visible'});
+   if(await page.locator('#typstFrame').isVisible())await page.frameLocator('#typstFrame').locator('#typst-app svg').first().waitFor({state:'visible'});
+  }
+  await page.locator('#toast').waitFor({state:'hidden',timeout:10000});await page.screenshot({path:path.join(output,name),animations:'disabled',fullPage:true});console.log('Captured '+name);
+ }
  try{
   const fresh=await api('/api/session');assert.equal(fresh.needsSetup,true,'Never capture a working user installation');
   await page.goto(origin);await page.locator('#auth').waitFor({state:'visible'});
@@ -21,6 +28,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const initial=(await api('/api/projects')).projects;const latex=initial.find(p=>p.main.endsWith('.tex'));const sample=await api('/api/projects','POST',{templateId:'getting-started-typst'});assert.ok(latex&&sample.id);
   // Replace the initial article with the public classic LaTeX starter.
   const article=await api('/api/projects','POST',{templateId:'research-article',name:'A research paper'});
+  for(const [file,content] of [['sections/notes.tex','% Research notes\n\\section{Notes}\nIdeas for a future experiment.\n'],['sections/methods.tex','% Optional methods appendix\n\\section{Methods}\nDescribe a reproducible procedure here.\n']])await api('/api/projects/'+article.id+'/file','PUT',{path:file,content,revision:0});
   await api('/api/projects/'+latex.id,'DELETE',{});latex.id=article.id;
   await api('/api/projects','POST',{name:'Research notes',format:'typst',template:false});
   const collection=await api('/api/project-folders','POST',{name:'Research collection'});
@@ -37,11 +45,16 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   await mobile.locator('#projectHome').waitFor({state:'visible'});await mobile.waitForFunction(()=>document.querySelectorAll('.project-entry').length===3&&document.querySelectorAll('.project-directory').length===1);
   await mobile.locator('#toast').waitFor({state:'hidden'});await mobile.screenshot({path:path.join(output,'projects-mobile.png'),animations:'disabled'});console.log('Captured projects-mobile.png');await mobile.close();
   await page.locator('.project-entry[data-project="'+sample.id+'"]').click();await page.locator('#workspace').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Live ·'));await capture('typst-workspace.png');
+  await page.locator('#code').evaluate(area=>{area.focus();const pos=area.value.indexOf('text(')+2;area.setSelectionRange(pos,pos);});await page.locator('#code').press('Control+Shift+Space');await page.locator('#typstDocumentation').waitFor({state:'visible'});await capture('typst-live.png');await page.locator('#typstDocumentation .icon').click();
   await page.locator('button.tree-file[title="sections/introduction.typ"]').click();await page.waitForFunction(()=>document.querySelector('#filePath').textContent==='sections/introduction.typ');await capture('source-editor.png');
   await page.locator('#themeButton').click();await editorOption(page,'pdfThemeButton');await capture('dark-theme.png');await editorOption(page,'pdfThemeButton');
   await page.locator('#themeButton').click();
   await page.locator('#projectsNavButton').click();await page.locator('#projectHome').waitFor({state:'visible'});await page.locator('.project-entry[data-project="'+latex.id+'"]').click();await page.locator('#workspace').waitFor({state:'visible'});
   const build=page.waitForResponse(r=>r.url().endsWith('/compile')&&r.request().method()==='POST');await page.locator('#compileButton').click();assert.equal((await(await build).json()).success,true);await page.waitForFunction(()=>document.querySelector('#buildStatus').textContent.startsWith('Compiled in'));await capture('workspace.png');
+  // Show real folding and multi-selection controls without changing the source.
+  await page.locator('button.fold-toggle[data-line="10"]').click();await page.locator('button.fold-toggle[data-line="15"]').click();await capture('source-folding.png');await editorOption(page,'unfoldAllSource');
+  for(const file of ['sections/methods.tex','sections/notes.tex'])await page.locator('.tree-file[title="'+file+'"]').click({modifiers:[process.platform==='darwin'?'Meta':'Control']});
+  await page.locator('.tree-file[title="sections/notes.tex"]').click({button:'right'});await page.locator('#deleteSelectedFiles').waitFor({state:'visible'});await capture('file-selection.png');await page.locator('#clearFileSelection').click();
   // Give this sample a fictional coauthor without ever displaying a live link.
   await api('/api/approved-emails','PUT',{emails:['demo-owner@example.test','demo-editor@example.test']});
   const invite=await api('/api/lab-invite','POST',{count:1});const signup=invite.links[0].url.split('#signup=')[1];

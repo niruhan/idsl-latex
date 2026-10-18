@@ -96,9 +96,9 @@ NODE_BIN=/path/to/node \
 python3 tests/run_browser.py --screenshots
 ```
 
-This runs `tests/capture_docs.cjs` instead of the regression suites. It requires a fresh database, creates only fictional `example.test` demo accounts and starter documents, captures grid/list/mobile project views, both editors (a classic LaTeX article is the main README image), the template library, account dropdown, source editing, sharing, GitHub settings, dark mode, the palette picker, and the Western/NeurIPS starters into `docs/images/`, then discards the database. It never uses the personal installation or writes to GitHub. The backup screenshot leaves its token field empty; sharing screenshots must not show generated invitation links.
+This runs `tests/capture_docs.cjs` instead of the regression suites. It requires a fresh database, creates only fictional `example.test` demo accounts and starter documents, captures grid/list/mobile project views, both editors (a classic LaTeX article is the main README image), source folding, multiple-file selection, live Typst/LSP, the template library, account dropdown, sharing, GitHub settings, dark mode, the palette picker, and the Western/NeurIPS starters into `docs/images/`, then discards the database. It waits for actual PDF/live rendering before capturing. It never uses the personal installation or writes to GitHub. The backup screenshot leaves its token field empty; sharing screenshots must not show generated invitation links.
 
-The native suite also writes `artifacts/tinymist-live.png`; after inspecting it, copy it to `docs/images/typst-live.png`. Keep the classic LaTeX editor as the main README image.
+The screenshot runner also refreshes `docs/images/typst-live.png` directly; the native regression suite keeps its separate test image in ignored `artifacts/`. Keep the classic LaTeX editor as the main README image.
 
 Inspect every screenshot before publishing. Check image metadata as well as visible pixels; never capture live projects or use redaction as a substitute for a disposable fixture.
 

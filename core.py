@@ -167,7 +167,7 @@ The challenge is to learn a reverse process that recovers the structure of the d
 
 Write, explore, and refine your ideas here. The IDSL Editor workspace keeps the files, equations, and references that make up your paper together in one project.
 
-Switch to Visual mode to edit plain paragraphs and headings. Advanced LaTeX remains available in source cards, so your original commands stay intact.
+Edit LaTeX directly in the source pane and compile to preview your paper. Fold sections and environments to focus on one part at a time.
 
 Diffusion models provide a useful starting point for studying generative processes~\cite{ho2020denoising}.
 '''.encode(),
@@ -201,8 +201,8 @@ $ x_t = sqrt(bar(alpha)_t) x_0 + sqrt(1 - bar(alpha)_t) epsilon,
 
 = Next steps
 
-- Edit headings and paragraphs in *Visual* mode.
-- Turn on auto-compile to keep the PDF up to date.
+- Edit headings and paragraphs in the source pane.
+- Watch the live preview update as you type.
 - Add figures, references, and your own chapters.
 
 #bibliography("references.bib")
@@ -211,7 +211,7 @@ $ x_t = sqrt(bar(alpha)_t) x_0 + sqrt(1 - bar(alpha)_t) epsilon,
 
 Write, explore, and refine your ideas here. Your source and compiled document stay side by side.
 
-Typst combines readable markup with precise typesetting. Use *bold text*, _emphasis_, and equations in source mode, or edit simple text directly in Visual mode.
+Typst combines readable markup with precise typesetting. Use *bold text*, _emphasis_, and equations in the source pane, with live updates beside your text.
 
 Diffusion models provide a useful starting point for studying generative processes @ho2020denoising.
 ''',

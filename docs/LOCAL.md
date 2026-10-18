@@ -137,7 +137,7 @@ The live service uses temporary mirrors; your authoritative source and history r
 
 Tinymist live editing is enabled by the **local Mac runner** for editable projects. If it is unavailable, the right pane explains why rather than loading a PDF. Linux shared hosting retains its isolated compiler for **Export PDF**; viewers may download an existing compiled PDF. Typst does not run background PDF builds while typing. LaTeX keeps its **Auto-compile** option.
 
-![Tinymist live preview and language controls with fictional source](images/typst-live.png)
+![Tinymist live preview and inline language documentation with fictional source](images/typst-live.png)
 
 ## GitHub backups
 
