@@ -1,6 +1,8 @@
 const unitFor=indent=>indent.includes('\t')?'\t':'  ';
 const indentOf=line=>line.match(/^[ \t]*/)[0];
 const startOfLine=(text,pos)=>pos?text.lastIndexOf('\n',pos-1)+1:0;
+const wordChar=ch=>Boolean(ch)&&/[\p{L}\p{N}_]/u.test(ch);
+const escapedAt=(text,pos)=>{let count=0;while(pos>0&&text[--pos]==='\\')count++;return count%2===1;};
 
 export function indentLines(text,start,end,outdent=false){
  if(start===end&&!outdent){const unit=unitFor(indentOf(text.slice(startOfLine(text,start))));return {text:text.slice(0,start)+unit+text.slice(end),start:start+unit.length,end:start+unit.length};}
@@ -18,17 +20,17 @@ export function indentLines(text,start,end,outdent=false){
 // Scan only complete source before the caret, keeping delimiters in comments,
 // escaped LaTeX text, strings and raw Typst text out of the block stack.
 function blocksBefore(text,language){
- const lines=text.split('\n'),indents=lines.map(indentOf),stack=[];let line=0,comment=0,raw=0,quote=false,lastClose=null,verbatim=null;
+ const lines=text.split('\n'),indents=lines.map(indentOf),stack=[];let line=0,comment=0,raw=0,quote=false,lastClose=null,verbatim=null,lineComment=false,inlineRaw=false,textQuote=false,singleQuote=false;
  const open=(name,close)=>{stack.push({name,close,indent:indents[line],line});lastClose=null;};
  const close=(name,end)=>{const item=stack.at(-1)?.name===name?stack.pop():null;lastClose={indent:item?.indent??indents[line].replace(/(?:\t| {1,2})$/,''),line,end};};
  for(let i=0;i<text.length;){
   const ch=text[i],pair=text.slice(i,i+2);
-  if(ch==='\n'){line++;i++;continue;}
+  if(ch==='\n'){line++;textQuote=singleQuote=false;i++;continue;}
   if(language==='latex'){
    if(verbatim){const token='\\end{'+verbatim+'}';if(text.startsWith(token,i)){close('env:'+verbatim,i+token.length);verbatim=null;i+=token.length;}else i++;continue;}
-   if(ch==='%'){const end=text.indexOf('\n',i);if(end<0)break;i=end;continue;}
+   if(ch==='%'){const end=text.indexOf('\n',i);if(end<0){lineComment=true;break;}i=end;continue;}
    if(ch==='\\'){
-    const verb=text.slice(i).match(/^\\verb\*?([^A-Za-z\s])/);if(verb){const end=text.indexOf(verb[1],i+verb[0].length),newline=text.indexOf('\n',i);i=end<0||newline>=0&&end>newline?i+verb[0].length:end+1;continue;}
+    const verb=text.slice(i).match(/^\\verb\*?([^A-Za-z\s])/);if(verb){const end=text.indexOf(verb[1],i+verb[0].length),newline=text.indexOf('\n',i);if(end<0||newline>=0&&end>newline){if(newline<0){inlineRaw=true;break;}i=newline;}else i=end+1;continue;}
     const env=text.slice(i).match(/^\\(begin|end)\s*\{([^{}\n]{1,80})\}/);
     if(env){if(env[1]==='begin'){open('env:'+env[2],'\\end{'+env[2]+'}');if(/^(?:verbatim\*?|Verbatim|lstlisting|minted|comment)$/.test(env[2]))verbatim=env[2];}else close('env:'+env[2],i+env[0].length);line+=(env[0].match(/\n/g)||[]).length;i+=env[0].length;continue;}
     if(pair==='\\['){open('display','\\]');i+=2;continue;}
@@ -40,17 +42,45 @@ function blocksBefore(text,language){
    if(raw){if(ch==='`'){const count=text.slice(i).match(/^`+/)[0].length;if(count===raw)raw=0;i+=count;}else i++;continue;}
    if(quote){if(ch==='\\'){if(text[i+1]==='\n')line++;i+=2;}else{if(ch==='"')quote=false;i++;}continue;}
    if(pair==='/*'){comment=1;i+=2;continue;}
-   if(pair==='//'&&text[i-1]!==':'){const end=text.indexOf('\n',i);if(end<0)break;i=end;continue;}
+   if(pair==='//'&&text[i-1]!==':'){const end=text.indexOf('\n',i);if(end<0){lineComment=true;break;}i=end;continue;}
    if(ch==='`'){raw=text.slice(i).match(/^`+/)[0].length;i+=raw;continue;}
    if(ch==='"'){quote=true;i++;continue;}
    if(ch==='\\'){if(text[i+1]==='\n')line++;i+=Math.min(2,text.length-i);continue;}
   }
+  // Prose quote state is only used for skipping a matching closing quote;
+  // apostrophes and LaTeX primes do not open a quoted span.
+  if(language==='latex'&&ch==='"')textQuote=!textQuote;
+  if(ch==="'"&&!(wordChar(text[i-1])&&wordChar(text[i+1]))){if(singleQuote)singleQuote=false;else if(!wordChar(text[i-1])&&!['\'', '`'].includes(text[i-1]))singleQuote=true;}
   if('([{'.includes(ch))open(ch,')]}'.charAt('([{'.indexOf(ch)));
   else if(')]}'.includes(ch))close('([{'.charAt(')]}'.indexOf(ch)),i+1);
   else if(!/\s/.test(ch))lastClose=null;
   i++;
  }
- return {open:stack.at(-1),closed:lastClose?.line===line?lastClose:null,line};
+ return {open:stack.at(-1),closed:lastClose?.line===line?lastClose:null,line,string:quote,doubleQuote:language==='latex'?textQuote:quote,singleQuote,literal:lineComment||inlineRaw||Boolean(comment||raw||verbatim)};
+}
+
+// Return an edit in full-source coordinates, or null for normal browser input.
+// Paste, IME composition and programmatic completions never enter this helper.
+export function pairedInput(text,start,end,inputType,data,language){
+ const pairs={'(':')','[':']','{':'}','"':'"',"'":"'"},selected=start!==end;
+ if(inputType==='insertText'){
+  if(!data||data.length!==1||!('()[]{}"\''.includes(data)))return null;
+  if(selected){const close=pairs[data];return close?{text:text.slice(0,start)+data+text.slice(start,end)+close+text.slice(end),start:start+1,end:end+1}:null;}
+  if(!pairs[data]&&text[start]!==data)return null;
+ }else if(inputType!=='deleteContentBackward'||selected||!start||!pairs[text[start-1]]||pairs[text[start-1]]!==text[start]||escapedAt(text,start-1))return null;
+ const context=blocksBefore(text.slice(0,start),language),next=text[start],prior=text[start-1];
+ if(context.literal)return null;
+ if(inputType==='deleteContentBackward'){
+  if(context.string&&prior!=='"'||prior==='"'&&!context.doubleQuote||prior==="'"&&!context.singleQuote)return null;
+  return {text:text.slice(0,start-1)+text.slice(start+1),start:start-1,end:start-1};
+ }
+ if(escapedAt(text,start))return null;
+ const quote=data==='"'||data==="'",insideQuote=data==='"'?context.doubleQuote:context.singleQuote;
+ if(next===data&&(quote?insideQuote:!context.string&&context.open?.close===data))return {text,start:start+1,end:start+1};
+ if(!pairs[data]||context.string||quote&&(insideQuote||wordChar(prior)||['\'', '`'].includes(prior)))return null;
+ // Pair at boundaries, without adding a closer in front of existing words.
+ if(next&&!/[\s)\]}"']/.test(next))return null;
+ return {text:text.slice(0,start)+data+pairs[data]+text.slice(start),start:start+1,end:start+1};
 }
 
 export function indentedNewline(text,start,end,language){

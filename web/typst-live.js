@@ -193,5 +193,5 @@ export function createTypstLive({api,state,setText,navigate,toast,sourceSelectio
  // stays open. Release the worker only once the page actually leaves.
  window.addEventListener('pagehide',()=>{if(session)navigator.sendBeacon(endpoint(),new Blob([JSON.stringify({operation:'close'})],{type:'application/json'}));});
  window.addEventListener('pageshow',event=>{if(event.persisted&&state().project)open().catch(report);});
- return {open,stop,changed,flush,render,get active(){return active();},get starting(){return starting;}};
+ return {open,stop,changed,flush,render,dismissCompletion:closeCompletion,get active(){return active();},get starting(){return starting;}};
 }

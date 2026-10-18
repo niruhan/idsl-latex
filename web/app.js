@@ -2,7 +2,7 @@ import {escapeHTML as esc} from './visual.js';
 import {createTypstLive} from './typst-live.js';
 import {createEditHistory} from './edit-history.js';
 import {createSourceFolding} from './source-folding.js';
-import {indentLines,indentedNewline} from './source-editing.js';
+import {indentLines,indentedNewline,pairedInput} from './source-editing.js';
 const $=id=>document.getElementById(id);
 const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',assetUrl:null,dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,keepPreview:false,githubToken:'',githubSaved:false,backupAuto:false};
 const Home={visible:false,projects:[],folders:[],templates:[],folder:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
@@ -786,7 +786,18 @@ action('helpButton',()=>modal('A workspace that stays out of the way',`<p><stron
 const editorPane=document.querySelector('.editor-pane');
 editorPane.addEventListener('beforeinput',event=>{
  if(['historyUndo','historyRedo'].includes(event.inputType)){event.preventDefault();undoEdit(event.inputType==='historyRedo');return;}
- if(event.target===$('code'))Source.prepareEdit(event.inputType);
+ if(event.target===$('code')){
+  Source.prepareEdit(event.inputType);
+  if(!event.defaultPrevented&&event.cancelable&&!event.isComposing&&editable()&&/\.(?:typ|tex|ltx|sty|cls|bib)$/.test(S.file?.path||'')){
+   const before=editSelection(),change=pairedInput(S.text,before.start,before.end,event.inputType,event.data,isTypst()?'typst':'latex');
+   if(change){
+    event.preventDefault();const after={mode:'source',start:change.start,end:change.end,direction:before.direction};
+    if(change.text===S.text){pendingEdit=null;EditHistory.breakGroup();restoreEditSelection(after);updateStats();Live.dismissCompletion();}
+    else setText(change.text,false,{before,after,kind:'pair'});
+    return;
+   }
+  }
+ }
  captureEdit(event.inputType);
 },true);
 editorPane.addEventListener('paste',()=>captureEdit('insertFromPaste'),true);
