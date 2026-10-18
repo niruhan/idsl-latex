@@ -2,6 +2,7 @@ import {escapeHTML as esc} from './visual.js';
 import {createTypstLive} from './typst-live.js';
 import {createEditHistory} from './edit-history.js';
 import {createSourceFolding} from './source-folding.js';
+import {indentLines,indentedNewline} from './source-editing.js';
 const $=id=>document.getElementById(id);
 const S={user:null,project:null,file:null,text:'',saved:'',mode:'source',assetUrl:null,dirty:false,saving:null,conflict:false,building:false,authMode:'login',invite:new URLSearchParams(location.hash.slice(1)).get('invite'),signup:new URLSearchParams(location.hash.slice(1)).get('signup'),canInviteLab:false,demo:false,pdfKey:null,keepPreview:false,githubToken:'',githubSaved:false,backupAuto:false};
 const Home={visible:false,projects:[],folders:[],templates:[],folder:null,filter:'all',view:localStorage.getItem('labtex-project-view')==='list'?'list':'grid',sort:'updated'};
@@ -16,7 +17,7 @@ const isTypst=()=>S.file?.path.endsWith('.typ');
 const isDocument=()=>/\.(tex|typ)$/.test(S.file?.path||'');
 const typstProject=()=>Boolean(S.project?.main.endsWith('.typ'));
 function scheduleCompile(){
- clearTimeout(autoTimer);if(typstProject()){if(Live.active)Live.changed();return;}if(!$('autoCompile').checked||!editable())return;
+ clearTimeout(autoTimer);if(typstProject()){Live.changed();return;}if(!$('autoCompile').checked||!editable())return;
  if(S.building||startingBuild){if(S.dirty)compileAgain=true;return;}
  autoTimer=setTimeout(()=>compile({automatic:true}).catch(fail),typstProject()?150:900);
 }
@@ -68,7 +69,7 @@ function setText(text,fromVisual=false,options={}){
  const pending=pendingEdit?.key===editKey()&&pendingEdit.text===S.text?pendingEdit:null;pendingEdit=null;
  const before=options.before||pending?.before||editSelection(),after=options.after||before;
  if(options.history!==false)EditHistory.record(S.text,text,before,after,options.kind??pending?.kind??'');
- S.text=text;S.dirty=S.text!==S.saved;markSaved(S.dirty?'Unsaved changes':'All changes saved',S.dirty?'dirty':'');if(!fromVisual)highlight(after);keepDraft();scheduleAutosave();updateStats();updateBuild();if(typstProject())scheduleCompile();
+ S.text=text;S.dirty=S.text!==S.saved;markSaved(S.dirty?'Unsaved changes':'All changes saved',S.dirty?'dirty':'');if(!fromVisual)highlight(after);keepDraft();scheduleAutosave();updateStats();updateBuild();if(typstProject())scheduleCompile();else Live.changed();
 }
 function undoEdit(redo=false){
  if(!editable()||!S.file||S.file.content===null)return;
@@ -140,7 +141,7 @@ const fileSelectionKey=(path,directory=false)=>(directory?'d:':'f:')+path;
 function resetFileSelection(){FileSelection.project=null;FileSelection.items.clear();FileSelection.anchor=null;FileSelection.mode=false;}
 function syncFileSelection(){
  if(FileSelection.project!==S.project?.id){resetFileSelection();FileSelection.project=S.project?.id;}
- const files=new Set(S.project?.files.map(file=>file.path)||[]),folders=new Set();
+ const files=new Set(S.project?.files.map(file=>file.path)||[]),folders=new Set(S.project?.directories||[]);
  for(const path of files){const parts=path.split('/');for(let index=1;index<parts.length;index++)folders.add(parts.slice(0,index).join('/'));}
  for(const [key,item] of FileSelection.items)if(!(item.directory?folders:files).has(item.path))FileSelection.items.delete(key);
 }
@@ -193,6 +194,10 @@ async function moveProjectFiles(dragged,folder){
 function renderFiles(){if(!S.project)return;syncFileSelection();const term=$('fileFilter').value.toLowerCase();const tree=$('fileTree'),state=folderState();const root={folders:new Map(),files:[]};
  const searchKey=state.key+':'+term;if(FileTree.searchKey!==searchKey){FileTree.searchKey=searchKey;FileTree.searchCollapsed.clear();}
  const collapsed=term?FileTree.searchCollapsed:state.collapsed;
+ for(const path of (S.project.directories||[]).filter(path=>path.toLowerCase().includes(term))){
+  const parts=path.split('/');let node=root;
+  for(let depth=0;depth<parts.length;depth++){const name=parts[depth];if(!node.folders.has(name))node.folders.set(name,{path:parts.slice(0,depth+1).join('/'),folders:new Map(),files:[]});node=node.folders.get(name);}
+ }
  for(const file of S.project.files.filter(file=>file.path.toLowerCase().includes(term))){
   const parts=file.path.split('/');let node=root;
   for(let depth=0;depth<parts.length-1;depth++){
@@ -519,6 +524,18 @@ async function addFile(folder='',pid=S.project?.id){
   }catch(error){fail(error);}finally{button.disabled=false;}
  });
 }
+async function addDirectory(folder='',pid=S.project?.id){
+ if(!editable()||S.project.id!==pid||!await save()||S.project?.id!==pid)return;
+ modal('New folder',`<form id="addDirectoryForm"><label>Folder name<input id="newDirectoryName" maxlength="220" required></label><div class="actions"><button id="createProjectDirectory" class="primary">Create folder</button></div></form>`);$('newDirectoryName').focus();
+ $('addDirectoryForm').addEventListener('submit',async event=>{
+  event.preventDefault();const button=$('createProjectDirectory');if(button.disabled)return;button.disabled=true;
+  try{
+   if(S.project?.id!==pid)throw Error('Reopen this project to create a folder.');
+   const path=insideFolder(folder,$('newDirectoryName').value.trim());await api('/api/projects/'+pid+'/directories','POST',{path});
+   if(S.project?.id!==pid)return;revealFile(path+'/');await refreshAfterFileChange(pid);closeModal();toast('Folder created.');
+  }catch(error){fail(error);}finally{button.disabled=false;}
+ });
+}
 let uploadTarget=null;
 function chooseUpload(folder='',pid=S.project?.id){
  if(!editable()||S.project.id!==pid)return;uploadTarget={folder,pid};$('uploadFiles').value='';$('uploadFiles').click();
@@ -538,7 +555,8 @@ function directoryMenu(folder='',options={}){
  fileMenuAnchor=options.anchor||$('fileTree');
  // Folder rows use aria-expanded for their children; do not overwrite it for the menu.
  const protectedMain=folder&&S.project.main.startsWith(folder+'/');
- menu.setAttribute('aria-label','Folder actions');menu.innerHTML=`<div class="file-menu-heading">${esc(folder||'Project root')}</div><button id="directoryNewFile" role="menuitem" ${disabled}>New file…</button><button id="directoryUpload" role="menuitem" ${disabled}>Upload files…</button><hr><button id="selectProjectFiles" role="menuitem" ${disabled}>${FileSelection.mode?'Finish selecting':'Select files…'}</button><button id="selectAllProjectFiles" role="menuitem" ${disabled}>Select all visible files</button>${folder?'<hr><button id="directoryDelete" class="danger" role="menuitem" '+(protectedMain?'disabled title="Choose another main document before deleting this folder."':disabled)+'>Delete folder…</button>':''}`;
+ menu.setAttribute('aria-label','Folder actions');menu.innerHTML=`<div class="file-menu-heading">${esc(folder||'Project root')}</div><button id="directoryNewFile" role="menuitem" ${disabled}>New file…</button><button id="directoryNewFolder" role="menuitem" ${disabled}>New folder…</button><button id="directoryUpload" role="menuitem" ${disabled}>Upload files…</button><hr><button id="selectProjectFiles" role="menuitem" ${disabled}>${FileSelection.mode?'Finish selecting':'Select files…'}</button><button id="selectAllProjectFiles" role="menuitem" ${disabled}>Select all visible files</button>${folder?'<hr><button id="directoryDelete" class="danger" role="menuitem" '+(protectedMain?'disabled title="Choose another main document before deleting this folder."':disabled)+'>Delete folder…</button>':''}`;
+ action('directoryNewFolder',()=>{closeFileContextMenu();return addDirectory(folder,pid);});
  action('directoryNewFile',()=>{closeFileContextMenu();return addFile(folder,pid);});action('directoryUpload',()=>{closeFileContextMenu();chooseUpload(folder,pid);});
  action('selectProjectFiles',()=>{const mode=!FileSelection.mode;FileSelection.items.clear();FileSelection.anchor=null;FileSelection.mode=mode;paintFileSelection();closeFileContextMenu(true);});
  action('selectAllProjectFiles',()=>{FileSelection.items.clear();for(const row of $('fileTree').querySelectorAll('.tree-file'))if(row.getClientRects().length)FileSelection.items.set(row.dataset.selectionKey,{path:row.title,directory:false});FileSelection.mode=true;paintFileSelection();closeFileContextMenu(true);});
@@ -585,15 +603,15 @@ function clearDeletedFileState(pid,paths){
 function deleteProjectFiles(target){return savedNavigation(async()=>{
  if(!editable()||S.project?.id!==target.pid)return;const project=await api('/api/projects/'+target.pid);if(S.project?.id!==target.pid)return;
  const files=selectedProjectFiles(project,target);
- if(!files.length||target.paths.some(path=>!project.files.some(file=>file.path===path))||target.directories.some(folder=>!project.files.some(file=>file.path.startsWith(folder+'/'))))throw Error('A selected item changed. Reopen the delete menu.');
+ if(!files.length&&!target.directories.length||target.paths.some(path=>!project.files.some(file=>file.path===path))||target.directories.some(folder=>!(project.directories||[]).includes(folder)&&!project.files.some(file=>file.path.startsWith(folder+'/'))))throw Error('A selected item changed. Reopen the delete menu.');
  if(files.some(file=>file.path===project.main))throw Error('Unselect the main document or choose another main document before deleting this selection.');
- modal(target.directories.length===1&&!target.paths.length?'Delete folder?':`Delete ${files.length} files?`,`<p>Delete ${files.length} ${files.length===1?'file':'files'}${target.directories.length?' including all contents of the selected folders':''} and their saved history?</p><ul class="delete-file-list">${files.map(file=>`<li>${esc(file.path)}</li>`).join('')}</ul><form id="deleteFilesForm"><div class="actions"><button type="button" id="cancelFileAction" class="outline">Cancel</button><button id="confirmDeleteFiles" class="primary">Delete ${files.length===1?'file':files.length+' files'}</button></div></form>`);action('cancelFileAction',closeModal);
+ modal(target.directories.length===1&&!target.paths.length?'Delete folder?':`Delete ${files.length} files?`,`<p>${files.length?`Delete ${files.length} ${files.length===1?'file':'files'}${target.directories.length?' including all contents of the selected folders':''} and their saved history?`:'Delete the selected empty folders?'}</p><ul class="delete-file-list">${(files.length?files.map(file=>file.path):target.directories).map(path=>`<li>${esc(path)}</li>`).join('')}</ul><form id="deleteFilesForm"><div class="actions"><button type="button" id="cancelFileAction" class="outline">Cancel</button><button id="confirmDeleteFiles" class="primary">Delete ${files.length===1?'file':files.length?files.length+' files':'folder'}</button></div></form>`);action('cancelFileAction',closeModal);
  $('deleteFilesForm').addEventListener('submit',async event=>{
   event.preventDefault();const button=$('confirmDeleteFiles');if(button.disabled||movingFiles)return;button.disabled=true;movingFiles=true;$('workspace').inert=true;
   try{
    if(S.project?.id!==target.pid||!await save()||S.project?.id!==target.pid)return;
    const result=await api('/api/projects/'+target.pid+'/delete-files','POST',{paths:target.paths,directories:target.directories,revision:project.revision});
-   clearDeletedFileState(target.pid,result.deleted);await refreshAfterFileChange(target.pid);if(S.project?.id===target.pid){closeModal();toast(result.deleted.length+' '+(result.deleted.length===1?'file deleted.':'files deleted.'));}
+   clearDeletedFileState(target.pid,result.deleted);await refreshAfterFileChange(target.pid);if(S.project?.id===target.pid){closeModal();toast(result.deleted.length?result.deleted.length+' '+(result.deleted.length===1?'file deleted.':'files deleted.'):'Folder deleted.');}
   }catch(error){fail(error);}finally{movingFiles=false;$('workspace').inert=Boolean(pendingNavigations);button.disabled=false;}
  });
 });}
@@ -788,7 +806,13 @@ function copySource(event){
  event.preventDefault();event.clipboardData.setData('text/plain',S.text.slice(before.start,before.end));
  if(event.type==='cut'&&editable())setText(S.text.slice(0,before.start)+S.text.slice(before.end),false,{before,after:{mode:'source',start:before.start,end:before.start},kind:'deleteByCut'});
 }
-$('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener('input',()=>{const change=Source.input();setText(change.text,false,{after:change.after});});$('code').addEventListener('scroll',syncScroll);$('code').addEventListener('click',updateStats);$('code').addEventListener('keyup',updateStats);$('code').addEventListener('keydown',e=>{if(e.key==='Tab'&&editable()){e.preventDefault();Source.prepareEdit('insertText');const before=editSelection(),pos=before.start+2;setText(S.text.slice(0,before.start)+'  '+S.text.slice(before.end),false,{before,after:{mode:'source',start:pos,end:pos},kind:'tab'});}});$('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();Live.open().then(enabled=>{if(!enabled&&$('autoCompile').checked)scheduleCompile();});}catch(e){fail(e);}});
+$('fileFilter').addEventListener('input',renderFiles);$('code').addEventListener('input',()=>{const change=Source.input();setText(change.text,false,{after:change.after});});$('code').addEventListener('scroll',syncScroll);$('code').addEventListener('click',updateStats);$('code').addEventListener('keyup',updateStats);
+$('code').addEventListener('keydown',event=>{
+ if(event.defaultPrevented||event.isComposing||!editable()||event.ctrlKey||event.metaKey||event.altKey||!['Tab','Enter'].includes(event.key))return;
+ event.preventDefault();Source.prepareEdit(event.key==='Enter'?'insertLineBreak':'insertText');const before=editSelection(),change=event.key==='Tab'?indentLines(S.text,before.start,before.end,event.shiftKey):indentedNewline(S.text,before.start,before.end,isTypst()?'typst':'latex');
+ setText(change.text,false,{before,after:{mode:'source',start:change.start,end:change.end,direction:before.direction},kind:event.key==='Tab'?'tab':'newline'});
+});
+$('mainFile').addEventListener('change',async()=>{try{if(!await save())return;await api(apiPath(),'PUT',{main:$('mainFile').value});S.project=await api(apiPath());renderFiles();updateBuild();Live.open().then(enabled=>{if(!enabled&&$('autoCompile').checked)scheduleCompile();});}catch(e){fail(e);}});
 $('autoCompile').addEventListener('change',()=>{localStorage.setItem('labtex-auto:'+S.project.id,String($('autoCompile').checked));clearTimeout(autoTimer);if($('autoCompile').checked)compile().catch(fail);});
 $('uploadFiles').addEventListener('cancel',()=>{uploadTarget=null;});
 $('uploadFiles').addEventListener('change',async event=>{

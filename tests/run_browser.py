@@ -28,15 +28,21 @@ def main():
     parser.add_argument('--editor-save',action='store_true',help='Run autosave and navigation checks on a fresh database')
     parser.add_argument('--file-actions',action='store_true',help='Run file selection, deletion, context menus, moves and editing regressions on a fresh database')
     parser.add_argument('--source-folding',action='store_true',help='Run LaTeX/Typst source folding and edit-preservation checks on a fresh database')
+    parser.add_argument('--autocomplete',action='store_true',help='Run LaTeX/Typst automatic and manual code-completion checks on a fresh database')
     args=parser.parse_args()
-    scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_editor_layout.cjs', 'browser_latex_source.cjs', 'browser_source_folding.cjs', 'browser_undo.cjs', 'browser_autosave.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs', 'browser_tree.cjs', 'browser_project_folders.cjs', 'browser_project_copy.cjs', 'browser_templates_palettes.cjs', 'browser_project_actions.cjs', 'browser_library_layout.cjs', 'browser_file_selection.cjs', 'browser_file_actions.cjs', 'browser_file_creation.cjs', 'browser_trash.cjs', 'browser_drag_live.cjs')
-    if args.live_typst:scripts=('browser_smoke.cjs','browser_tinymist.cjs')
+    scripts=('capture_docs.cjs',) if args.screenshots else ('browser_smoke.cjs', 'browser_editor_layout.cjs', 'browser_latex_source.cjs', 'browser_source_folding.cjs', 'browser_completions.cjs', 'browser_undo.cjs', 'browser_autosave.cjs', 'browser_typst.cjs', 'browser_home.cjs', 'browser_theme.cjs', 'browser_tree.cjs', 'browser_project_folders.cjs', 'browser_project_copy.cjs', 'browser_templates_palettes.cjs', 'browser_project_actions.cjs', 'browser_library_layout.cjs', 'browser_file_selection.cjs', 'browser_file_actions.cjs', 'browser_file_creation.cjs', 'browser_trash.cjs', 'browser_drag_live.cjs')
+    if args.live_typst:scripts=('browser_smoke.cjs','browser_tinymist.cjs','browser_completions.cjs')
     if args.latex_source:scripts=('browser_latex_source.cjs',)
     if args.backup_ui:scripts=('browser_smoke.cjs','browser_typst.cjs','browser_drag_live.cjs')
     if args.editor_undo:scripts=('browser_undo.cjs',)
     if args.editor_save:scripts=('browser_autosave.cjs',)
     if args.file_actions:scripts=('browser_smoke.cjs','browser_file_selection.cjs','browser_file_actions.cjs','browser_file_creation.cjs','browser_tree.cjs','browser_drag_live.cjs','browser_undo.cjs','browser_autosave.cjs')
     if args.source_folding:scripts=('browser_source_folding.cjs',)
+    if args.autocomplete:scripts=('browser_smoke.cjs','browser_completions.cjs')
+    # The full run keeps completion fixtures in their own disposable server so
+    # repeated demo sign-ins do not exhaust the production login rate limiter.
+    full_run=not any(vars(args).values())
+    if full_run:scripts=tuple(script for script in scripts if script!='browser_completions.cjs')
     with tempfile.TemporaryDirectory(prefix='labtex-browser-') as folder:
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
@@ -63,6 +69,7 @@ def main():
         finally:
             server.terminate()
             server.wait(timeout=10)
+    if full_run:subprocess.run([sys.executable,str(Path(__file__).resolve()),'--autocomplete'],cwd=ROOT,check=True)
 
 
 if __name__ == '__main__': main()

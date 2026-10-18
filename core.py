@@ -21,7 +21,14 @@ def safe_path(path):
         raise Problem('This folder name is reserved for compilation.')
     return path
 
-def unpack_zip(raw):
+def directory_paths(files, directories=()):
+    folders=set(directories)
+    for path in list(files)+list(folders):
+        parts=path.split('/')
+        folders.update('/'.join(parts[:index]) for index in range(1,len(parts)))
+    return folders
+
+def unpack_zip(raw, include_directories=False):
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
             entries = [x for x in z.infolist() if not x.is_dir() and not x.filename.startswith('__MACOSX/') and not any(p.startswith('.') and p not in ('.','..') for p in x.filename.split('/'))]
@@ -31,8 +38,10 @@ def unpack_zip(raw):
                 safe_path(x.filename)
                 if x.file_size > MAX_FILE or (x.external_attr >> 16) & 0o170000 == 0o120000:
                     raise Problem('ZIP contains an oversized file or symbolic link.')
+            folder_entries=[x for x in z.infolist() if x.is_dir() and not x.filename.startswith('__MACOSX/') and not any(p.startswith('.') and p not in ('.','..') for p in x.filename[:-1].split('/'))]
+            if len(folder_entries)>MAX_FILES: raise Problem('ZIP contains too many folders.')
             prefix = entries[0].filename.split('/')[0] + '/'
-            strip = all(x.filename.startswith(prefix) for x in entries)
+            strip = all(x.filename.startswith(prefix) for x in entries) and all(x.filename==prefix or x.filename.startswith(prefix) for x in folder_entries)
             files = {}
             for x in entries:
                 name = safe_path(x.filename[len(prefix):] if strip else x.filename)
@@ -49,14 +58,22 @@ def unpack_zip(raw):
                         del files['labtex-project.json']
                 except (ValueError, TypeError, KeyError, AttributeError):
                     pass
-            return files
+            directories=set()
+            for entry in folder_entries:
+                if strip and entry.filename==prefix: continue
+                name=safe_path(entry.filename[len(prefix):-1] if strip else entry.filename[:-1])
+                if (entry.external_attr>>16)&0o170000==0o120000: raise Problem('ZIP contains a symbolic link.')
+                directories.add(name)
+            if set(files)&directory_paths(files,directories): raise Problem('A ZIP path cannot be both a file and a folder.')
+            return (files,directories) if include_directories else files
     except (zipfile.BadZipFile, RuntimeError, NotImplementedError):
         raise Problem('Use a valid, unencrypted ZIP archive.')
 
-def pack_zip(files):
+def pack_zip(files, directories=()):
     out = io.BytesIO()
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
         for path, data in files.items(): z.writestr(safe_path(path), data)
+        for path in sorted(directories): z.writestr(safe_path(path)+'/', b'')
     return out.getvalue()
 
 def decode_files(items):

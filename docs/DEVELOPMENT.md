@@ -88,6 +88,8 @@ The test checks source editing, autosave, PDF preview/export, viewer access, pri
 
 ## Documentation screenshots
 
+`python3 tests/run_browser.py --autocomplete` checks automatic/manual completions, snippets, project references, undo, folded-source offsets and viewer permissions on disposable data. `--live-typst` also runs these checks against Tinymist. `web/completions.js` supplies the local LaTeX/Typst candidates; the existing language-tools controller handles keyboard/pointer interaction and full-source insertion. Related-file lookups stay within the current project, cache by file revision, and cap their count and bytes.
+
 Regenerate the README images after compiler setup using the same temporary-server harness:
 
 ```sh

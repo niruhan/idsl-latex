@@ -1,0 +1,31 @@
+const assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+(async()=>{
+ const origin=process.env.TEST_ORIGIN,browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_BIN}),context=await browser.newContext({viewport:{width:1500,height:960}}),page=await context.newPage(),projects=[],errors=[];
+ page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));
+ async function api(url,method='GET',data){const response=await context.request.fetch(origin+url,{method,headers:{Origin:origin},data});assert.equal(response.ok(),true,await response.text());return response.json();}
+ const code=page.locator('#code'),popup=page.locator('#typstCompletions'),option=name=>popup.getByRole('option',{name,exact:true});
+ async function type(text,name){await code.fill(text);await option(name).waitFor({state:'visible'});}
+ async function open(pid){await page.goto(origin+'/#project='+pid);await page.waitForFunction(()=>!document.querySelector('#workspace').hidden&&!document.querySelector('#workspace').inert);}
+ try{
+  await page.goto(origin);await page.locator('input[name=email]').fill('browser-owner@example.test');await page.locator('input[name=password]').fill('browser-test-password-only');await page.locator('#authSubmit').click();await page.locator('#projectHome').waitFor({state:'visible'});
+  const latex=(await api('/api/projects','POST',{name:'Completion examples',template:false})).id;projects.push(latex);const base='/api/projects/'+latex;
+  await api(base+'/file','PUT',{path:'references.bib',content:'@article{smith2026, title={A fictional example}, author={Smith, Alex}, year={2026}}',revision:0});
+  await api(base+'/file','PUT',{path:'sections/intro.tex',content:'\\section{Introduction}\\label{sec:intro}\nExample.',revision:0});await open(latex);
+  await type('\\sec','section');await code.press('Tab');assert.equal(await code.inputValue(),'\\section{Title}');assert.equal(await code.evaluate(area=>area.value.slice(area.selectionStart,area.selectionEnd)),'Title');await code.press('Control+z');assert.equal(await code.inputValue(),'\\sec');await code.press('Control+Shift+z');assert.equal(await code.inputValue(),'\\section{Title}');
+  await type('\\begin{equ','equation');await code.press('Enter');assert.equal(await code.inputValue(),'\\begin{equation}\n  \n\\end{equation}');
+  await type('\\cite{smi','smith2026');await option('smith2026').dispatchEvent('pointerdown');assert.equal(await code.inputValue(),'\\cite{smith2026}');
+  await type('\\ref{sec:','sec:intro');await code.press('Tab');assert.equal(await code.inputValue(),'\\ref{sec:intro}');
+  await type('\\input{sections/i','sections/intro.tex');await code.press('Enter');assert.equal(await code.inputValue(),'\\input{sections/intro.tex}');
+  await code.fill('\\section{Existing title}');await code.evaluate(area=>area.setSelectionRange(4,4));await code.press('Control+Space');await option('section').waitFor();await code.press('Tab');assert.equal(await code.inputValue(),'\\section{Existing title}','Completing inside a command preserves its arguments');
+  await code.fill('\\fra');await code.press('Control+Space');await option('frac').waitFor();await code.press('Escape');assert.equal(await popup.isHidden(),true);assert.equal(await code.inputValue(),'\\fra');
+  await code.fill('% \\sec');await page.waitForTimeout(400);assert.equal(await popup.isHidden(),true,'No suggestions in LaTeX comments');
+  const folded='\\section{Hidden}\nKeep this source.\n\\section{Visible}\n\\sec';await code.fill(folded);await page.locator('.fold-toggle[data-line="1"]').click();await code.evaluate(area=>{area.focus();area.setSelectionRange(area.value.length,area.value.length);});await code.press('Control+Space');await option('section').waitFor();await code.press('Tab');await page.waitForFunction(()=>document.querySelector('#saveStatus').textContent==='All changes saved');assert.equal((await api(base+'/file?path=main.tex')).content,folded+'tion{Title}');assert.equal((await code.inputValue()).includes('Keep this source.'),false);await code.press('Control+z');assert.equal((await code.inputValue()).endsWith('\\sec'),true);
+  const typst=(await api('/api/projects','POST',{name:'Typst completion examples',format:'typst',template:false})).id;projects.push(typst);await open(typst);
+  await type('#ali','align');await option('align').dispatchEvent('pointerdown');assert.match(await code.inputValue(),/^#align\(/);assert.doesNotMatch(await code.inputValue(),/\$\{\d/);await code.press('Control+z');assert.equal(await code.inputValue(),'#ali');
+  await type('#let custom-name = 5\n#cust','custom-name');await option('custom-name').dispatchEvent('pointerdown');assert.equal(await code.inputValue(),'#let custom-name = 5\n#custom-name');
+  await code.fill('#rec');await code.press('Control+Space');await option('rect').waitFor();assert.equal(await option('circle').count(),0);await code.press('Tab');assert.match(await code.inputValue(),/^#rect(?:\(|\[|$)/);assert.doesNotMatch(await code.inputValue(),/\$\{\d/);
+  const invite=await api(base+'/invite','POST',{role:'viewer'}),viewerContext=await browser.newContext(),viewer=await viewerContext.newPage();await viewer.goto(origin);await viewer.locator('input[name=email]').fill('browser-viewer@example.test');await viewer.locator('input[name=password]').fill('viewer-test-password-only');await viewer.locator('#authSubmit').click();await viewer.locator('#projectHome').waitFor({state:'visible'});await viewer.goto(invite.url);await viewer.locator('#workspace').waitFor({state:'visible'});await viewer.locator('#code').focus();await viewer.locator('#code').press('Control+Space');assert.equal(await viewer.locator('#typstCompletions').isHidden(),true);await viewerContext.close();
+  assert.deepEqual(errors,[]);console.log('PASS automatic/manual LaTeX and Typst suggestions, environment snippets, citation/label/file lookup, keyboard and pointer acceptance, placeholder selection, undo/redo, comments, folded full-source offsets and viewer protection');
+ }finally{for(const id of projects)await api('/api/projects/'+id,'DELETE',{}).catch(()=>{});await browser.close();}
+})().catch(error=>{console.error(error);process.exit(1);});

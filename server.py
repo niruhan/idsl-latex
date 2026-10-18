@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from core import Problem, MAX_FILE, MAX_PROJECT, MAX_FILES, SAMPLE, TYPST_SAMPLE, safe_path, pack_zip, unpack_zip, compile_project, starter_files, main_document
+from core import Problem, MAX_FILE, MAX_PROJECT, MAX_FILES, SAMPLE, TYPST_SAMPLE, safe_path, directory_paths, pack_zip, unpack_zip, compile_project, starter_files, main_document
 from github_backup import destination, GitHub, backup_snapshot
 from project_templates import TEMPLATES, template_files
 from credential_store import token_store, valid_token
@@ -68,7 +68,7 @@ def email_address(s):
     return s
 
 def delete_project_rows(db,pid):
-    for table in ('members','files','history','invites','builds','build_sources','project_backups','shared_project_backups','project_locations','project_trash'):
+    for table in ('members','files','directories','history','invites','builds','build_sources','project_backups','shared_project_backups','project_locations','project_trash'):
         db.execute('DELETE FROM '+table+' WHERE project_id=?',(pid,))
     db.execute('DELETE FROM projects WHERE id=?',(pid,))
 
@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT,owner TEXT,mai
 CREATE TABLE IF NOT EXISTS project_trash(project_id TEXT PRIMARY KEY,deleted REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS members(project_id TEXT,user_id TEXT,role TEXT,PRIMARY KEY(project_id,user_id));
 CREATE TABLE IF NOT EXISTS files(project_id TEXT,path TEXT,content BLOB,revision INTEGER,PRIMARY KEY(project_id,path));
+CREATE TABLE IF NOT EXISTS directories(project_id TEXT,path TEXT,PRIMARY KEY(project_id,path));
 CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY,project_id TEXT,path TEXT,content BLOB,revision INTEGER,author TEXT,created REAL);
 CREATE TABLE IF NOT EXISTS invites(token TEXT PRIMARY KEY,project_id TEXT,role TEXT,expires REAL);
 CREATE TABLE IF NOT EXISTS builds(project_id TEXT PRIMARY KEY,revision INTEGER,success INTEGER,log TEXT,pdf BLOB,seconds REAL,created REAL,engine TEXT);
@@ -167,7 +168,10 @@ AND b.last_url='https://github.com/'||s.repository||'/commit/'||b.last_commit'''
         else:
             self.folder(db,user_id,folder_id)
             db.execute('INSERT OR REPLACE INTO project_locations VALUES(?,?,?)',(user_id,pid,folder_id))
-    def new_project(self,db,owner,name,files,folder=None):
+    def new_project(self,db,owner,name,files,folder=None,directories=()):
+        directories={safe_path(path) for path in directories}
+        if len(directories)>MAX_FILES: raise Problem('A project can contain up to 1000 folders.',413)
+        if set(files)&directory_paths(files,directories): raise Problem('A path cannot be both a file and a folder.',409)
         if db.execute('SELECT COUNT(*) FROM projects WHERE owner=?',(owner,)).fetchone()[0]>=MAX_OWNED_PROJECTS:
             raise Problem('You can own up to 25 projects, including Trash. Permanently delete an unused project from Trash first.',413)
         if folder is not None: self.folder(db,owner,folder)
@@ -175,7 +179,9 @@ AND b.last_url='https://github.com/'||s.repository||'/commit/'||b.last_commit'''
         main=main_document(files)
         db.execute('INSERT INTO projects VALUES(?,?,?,?,1,?)',(pid,title(name),owner,main,time.time()))
         db.execute('INSERT INTO members VALUES(?,?,?)',(pid,owner,'owner'))
-        db.executemany('INSERT INTO files VALUES(?,?,?,1)',[(pid,p,c) for p,c in files.items()]); self.locate_project(db,owner,pid,folder); return pid
+        db.executemany('INSERT INTO files VALUES(?,?,?,1)',[(pid,p,c) for p,c in files.items()])
+        db.executemany('INSERT INTO directories VALUES(?,?)',[(pid,path) for path in directories])
+        self.locate_project(db,owner,pid,folder); return pid
     def project_location(self,db,user_id,pid):
         row=db.execute('SELECT folder_id FROM project_locations WHERE user_id=? AND project_id=?',(user_id,pid)).fetchone()
         return row['folder_id'] if row else None
@@ -191,7 +197,8 @@ WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_tras
             if name.casefold() not in names: break
             number+=1
         files={row['path']:row['content'] for row in db.execute('SELECT path,content FROM files WHERE project_id=?',(project['id'],))}
-        pid=self.new_project(db,user['id'],name,files,folder)
+        directories=[row['path'] for row in db.execute('SELECT path FROM directories WHERE project_id=?',(project['id'],))]
+        pid=self.new_project(db,user['id'],name,files,folder,directories)
         db.execute('UPDATE projects SET main=? WHERE id=?',(project['main'],pid))
         return {'id':pid,'name':name,'folder':folder}
     def access(self,db,pid,user,write=False,owner=False):
@@ -211,6 +218,23 @@ WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_tras
             self.trash_checked=time.time()
         finally: self.trash_lock.release()
     def touch(self,db,pid): db.execute('UPDATE projects SET revision=revision+1,updated=? WHERE id=?',(time.time(),pid))
+    def file_tree(self,db,pid):
+        files={row['path'] for row in db.execute('SELECT path FROM files WHERE project_id=?',(pid,))}
+        explicit={row['path'] for row in db.execute('SELECT path FROM directories WHERE project_id=?',(pid,))}
+        return files,directory_paths(files,explicit),explicit
+    def file_destination(self,db,pid,path):
+        files,folders,_=self.file_tree(db,pid)
+        if path in folders or any(path.startswith(file+'/') for file in files):
+            raise Problem('A file or folder already exists at that path.',409)
+    def create_directory(self,db,project,data):
+        path=safe_path(data.get('path'));pid=project['id']
+        files,folders,explicit=self.file_tree(db,pid)
+        if path in folders or any(path==file or path.startswith(file+'/') for file in files):
+            raise Problem('A file or folder already exists at that path.',409)
+        additions=directory_paths([], [path])|{path}
+        if len(explicit|additions)>MAX_FILES: raise Problem('A project can contain up to 1000 folders.',413)
+        db.executemany('INSERT OR IGNORE INTO directories VALUES(?,?)',[(pid,folder) for folder in sorted(additions)])
+        self.touch(db,pid);return {'path':path}
     def delete_files(self,db,project,data):
         paths,directories=data.get('paths',[]),data.get('directories',[])
         if not isinstance(paths,list) or not isinstance(directories,list) or not 1<=len(paths)+len(directories)<=MAX_FILES:
@@ -218,18 +242,20 @@ WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_tras
         paths={safe_path(path) for path in paths};directories={safe_path(path) for path in directories}
         if type(data.get('revision')) is not int: raise Problem('Provide the current project revision.')
         if data['revision']!=project['revision']: raise Problem('Project changed. Reopen the delete menu to review the current files.',409)
-        pid=project['id'];files={row['path'] for row in db.execute('SELECT path FROM files WHERE project_id=?',(pid,))}
+        pid=project['id'];files,folders,explicit=self.file_tree(db,pid)
         if paths-files: raise Problem('A selected file no longer exists.',404)
         selected=set(paths)
         for directory in directories:
             children={path for path in files if path.startswith(directory+'/')}
-            if not children: raise Problem('A selected folder no longer exists.',404)
+            if directory not in folders: raise Problem('A selected folder no longer exists.',404)
             selected.update(children)
         if project['main'] in selected: raise Problem('Choose another main document before deleting this file or folder.')
         # Validate the complete selection before changing either source or history.
         rows=[(pid,path) for path in sorted(selected)]
         db.executemany('DELETE FROM history WHERE project_id=? AND path=?',rows)
         db.executemany('DELETE FROM files WHERE project_id=? AND path=?',rows)
+        removed={path for path in explicit if any(path==folder or path.startswith(folder+'/') for folder in directories)}
+        db.executemany('DELETE FROM directories WHERE project_id=? AND path=?',[(pid,path) for path in removed])
         self.touch(db,pid)
         return {'deleted':sorted(selected),'revision':project['revision']+1}
     def move_files(self,db,project,data):
@@ -240,22 +266,23 @@ WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_tras
         if destination not in (None,''): destination=safe_path(destination)
         else: destination=''
         if data.get('revision')!=project['revision']: raise Problem('Project changed. Refresh and try moving again.',409)
-        files={row['path'] for row in db.execute('SELECT path FROM files WHERE project_id=?',(pid,))}
+        files,folders,explicit=self.file_tree(db,pid)
         directory=data['directory']
         selected=sorted(path for path in files if path.startswith(source+'/')) if directory else [source] if source in files else []
-        if not selected: raise Problem('File or folder not found.',404)
-        if destination and not any(path.startswith(destination+'/') for path in files): raise Problem('Destination folder not found.',404)
+        if (directory and source not in folders) or (not directory and not selected): raise Problem('File or folder not found.',404)
+        if destination and destination not in folders: raise Problem('Destination folder not found.',404)
         if directory and (destination==source or destination.startswith(source+'/')): raise Problem('A folder cannot be moved inside itself.',409)
         target=(destination+'/' if destination else '')+source.rsplit('/',1)[-1]
         moves={path:safe_path(target+path[len(source):]) for path in selected}
-        if all(old==new for old,new in moves.items()): return {'moves':moves,'changed':False}
+        if target==source: return {'moves':moves,'changed':False}
         # Reject merging directories as well as overwriting individual files.
-        if target in files or any(path.startswith(target+'/') for path in files-set(selected)):
+        if target in files or target in folders or any(path.startswith(target+'/') for path in files-set(selected)):
             raise Problem('A file or folder already exists at the destination.',409)
         remaining=files-set(selected)
         for new in moves.values():
-            if new in remaining or any(new.startswith(path+'/') or path.startswith(new+'/') for path in remaining):
+            if new in remaining or new in folders or any(new.startswith(path+'/') or path.startswith(new+'/') for path in remaining):
                 raise Problem('A file or folder already exists at the destination.',409)
+        directory_moves={path:safe_path(target+path[len(source):]) for path in explicit if directory and (path==source or path.startswith(source+'/'))}
         temporary='_move_'+secrets.token_hex(16)+'/'
         for old in selected:
             db.execute('UPDATE files SET path=? WHERE project_id=? AND path=?',(temporary+old,pid,old))
@@ -263,6 +290,9 @@ WHERE m.user_id=? AND l.folder_id IS ? AND NOT EXISTS(SELECT 1 FROM project_tras
         for old,new in moves.items():
             db.execute('UPDATE files SET path=?,revision=revision+1 WHERE project_id=? AND path=?',(new,pid,temporary+old))
             db.execute('UPDATE history SET path=? WHERE project_id=? AND path=?',(new,pid,temporary+old))
+        for old,new in directory_moves.items():
+            db.execute('DELETE FROM directories WHERE project_id=? AND path=?',(pid,old))
+            db.execute('INSERT INTO directories VALUES(?,?)',(pid,new))
         if project['main'] in moves: db.execute('UPDATE projects SET main=? WHERE id=?',(moves[project['main']],pid))
         self.touch(db,pid)
         return {'moves':moves,'changed':True}
@@ -545,7 +575,7 @@ class Handler(BaseHTTPRequestHandler):
                     target=dict(row)
             return app.backup(backup_match[1],user,app.backup_token(user,data.get('token')),shared_target=target)
         if method=='GET' and not path.startswith('/api/'):
-            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/edit-history.js':'edit-history.js','/source-folding.js':'source-folding.js','/typst-live.js':'typst-live.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
+            allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/visual.js':'visual.js','/edit-history.js':'edit-history.js','/source-folding.js':'source-folding.js','/source-editing.js':'source-editing.js','/completions.js':'completions.js','/typst-live.js':'typst-live.js','/style.css':'style.css','/theme.css':'theme.css','/palettes.css':'palettes.css','/theme.js':'theme.js','/favicon.svg':'favicon.svg'}
             allowed.update(PDF_ASSETS)
             allowed.update({name:name[1:] for name in ('/pdf-viewer.html','/pdf-viewer.js','/pdf-viewer.css')})
             if path not in allowed: raise Problem('Not found.',404)
@@ -673,13 +703,15 @@ class Handler(BaseHTTPRequestHandler):
                 if method=='GET': return {'projects':[dict(x) for x in db.execute('SELECT p.id,p.name,p.main,p.updated,m.role,l.folder_id AS folder FROM projects p JOIN members m ON p.id=m.project_id LEFT JOIN project_locations l ON l.project_id=p.id AND l.user_id=m.user_id WHERE m.user_id=? AND NOT EXISTS(SELECT 1 FROM project_trash t WHERE t.project_id=p.id) ORDER BY p.updated DESC',(user['id'],))]}
                 if method=='POST':
                     db.execute('BEGIN IMMEDIATE')
+                    directories=()
                     if 'templateId' in data:
                         if data.get('zip'): raise Problem('Choose a ZIP import or a starter template.')
                         template,files=template_files(data['templateId']);name=data.get('name',template['name'])
                     else:
-                        files=unpack_zip(base64.b64decode(data['zip'],validate=True)) if data.get('zip') else starter_files(data.get('format','latex'),data.get('template',True))
+                        if data.get('zip'): files,directories=unpack_zip(base64.b64decode(data['zip'],validate=True),include_directories=True)
+                        else: files=starter_files(data.get('format','latex'),data.get('template',True))
                         name=data.get('name','Untitled paper')
-                    return {'id':app.new_project(db,user['id'],name,files,data.get('folder'))}
+                    return {'id':app.new_project(db,user['id'],name,files,data.get('folder'),directories)}
             match=re.fullmatch(r'/api/projects/([a-f0-9]{24})(?:/(.*))?',path)
             if not match: raise Problem('Not found.',404)
             pid,action=match.groups()
@@ -688,6 +720,7 @@ class Handler(BaseHTTPRequestHandler):
             p=app.access(db,pid,user,write=method!='GET' and action not in ('folder','duplicate'))
             if action=='duplicate' and method=='POST': return app.duplicate_project(db,p,user)
             if action=='delete-files' and method=='POST': return app.delete_files(db,p,data)
+            if action=='directories' and method=='POST': return app.create_directory(db,p,data)
             if action=='folder' and method=='PUT':
                 if 'folder' not in data: raise Problem('Choose a destination folder.')
                 app.locate_project(db,user['id'],pid,data['folder']);return {'ok':True}
@@ -713,6 +746,7 @@ class Handler(BaseHTTPRequestHandler):
                 if method=='GET':
                     p['folder']=app.project_location(db,user['id'],pid)
                     p['files']=[dict(x) for x in db.execute('SELECT path,length(content) AS size,revision FROM files WHERE project_id=? ORDER BY path',(pid,))]
+                    p['directories']=sorted(app.file_tree(db,pid)[1])
                     b=db.execute('SELECT revision,success,seconds,created,engine FROM builds WHERE project_id=?',(pid,)).fetchone(); p['build']=dict(b) if b else None; return p
                 if method=='PUT':
                     if 'main' in data:
@@ -733,6 +767,7 @@ class Handler(BaseHTTPRequestHandler):
                     except UnicodeDecodeError: binary,content=True,None
                     return {'path':name,'revision':row['revision'],'content':None if binary else content,'base64':base64.b64encode(row['content']).decode() if binary else None}
                 if method=='PUT':
+                    app.file_destination(db,pid,name)
                     if (row and data.get('revision',0)!=row['revision']) or (not row and data.get('revision',0)!=0): raise Problem('This file changed on the server. Compare your draft with the latest version.',409)
                     content=base64.b64decode(data['base64'],validate=True) if 'base64' in data else str(data.get('content','')).encode()
                     total,count=db.execute('SELECT COALESCE(SUM(length(content)),0),COUNT(*) FROM files WHERE project_id=?',(pid,)).fetchone()
@@ -759,6 +794,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not row or row['revision']!=data.get('revision'): raise Problem('File changed; refresh before renaming.',409)
                 if db.execute('SELECT 1 FROM files WHERE project_id=? AND path=?',(pid,new)).fetchone():
                     raise Problem('A file already exists at that path. Choose a different name.',409)
+                app.file_destination(db,pid,new)
                 db.execute('UPDATE files SET path=?,revision=revision+1 WHERE project_id=? AND path=?',(new,pid,old)); db.execute('UPDATE history SET path=? WHERE project_id=? AND path=?',(new,pid,old))
                 if p['main']==old: db.execute('UPDATE projects SET main=? WHERE id=?',(new,pid))
                 app.touch(db,pid); return {'ok':True}
@@ -771,7 +807,7 @@ class Handler(BaseHTTPRequestHandler):
                 return {'versions':[dict(x) for x in db.execute('SELECT id,revision,author,created FROM history WHERE project_id=? AND path=? ORDER BY id DESC',(pid,name))]}
             if action=='source.zip' and method=='GET':
                 files={x['path']:x['content'] for x in db.execute('SELECT path,content FROM files WHERE project_id=?',(pid,))}
-                self.send(pack_zip(files),kind='application/zip',headers={'Content-Disposition':export_disposition(p['name'],'.zip')}); return
+                self.send(pack_zip(files,app.file_tree(db,pid)[2]),kind='application/zip',headers={'Content-Disposition':export_disposition(p['name'],'.zip')}); return
             if action=='synctex' and method=='GET':
                 row=db.execute('SELECT b.created,b.revision,s.source_map FROM builds b LEFT JOIN build_sources s ON s.project_id=b.project_id AND s.created=b.created WHERE b.project_id=?',(pid,)).fetchone()
                 if not row or not row['source_map']: return {'files':[],'pages':{}}
