@@ -1,4 +1,4 @@
-#import "vendor/touying/lib.typ": *
+#import "@preview/touying:0.5.3": *
 #import themes.university: slide as university-slide
 
 // -------------------------------------------------------------

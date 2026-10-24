@@ -37,7 +37,9 @@ def sandbox_command(arguments, work):
         '--setenv', 'TECTONIC_UNTRUSTED_MODE', '1',
     ]
     if arguments[:1] == ['compile']:
-        return command + ['--', '/opt/tex/bin/typst', *arguments]
+        return command + ['--ro-bind', str(ROOT / 'typst-packages'), '/opt/typst-packages',
+                          '--setenv', 'TYPST_PACKAGE_PATH', '/opt/typst-packages',
+                          '--', '/opt/tex/bin/typst', *arguments]
     return command + ['--', '/opt/tex/bin/tectonic', '--bundle', '/opt/texbundle/bundle.zip', *arguments]
 
 

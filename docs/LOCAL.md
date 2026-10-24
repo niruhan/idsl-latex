@@ -21,6 +21,8 @@ Setup installs pinned, SHA-256-verified **Typst 0.15.1**, **Tectonic 0.17.0**, a
 | Command | Purpose |
 | --- | --- |
 | `./labtex start` | Start in the background; repeated starts reuse the running app |
+| `./labtex open` | Start if needed and open the configured URL in your default browser |
+| `./labtex desktop` | Install the personal Mac app and Desktop shortcut |
 | `./labtex stop` | Stop while retaining all projects |
 | `./labtex status` | Show whether the app is running and its local URL |
 | `./labtex setup-token` | Show the private first-account token until setup is complete |
@@ -29,6 +31,8 @@ Setup installs pinned, SHA-256-verified **Typst 0.15.1**, **Tectonic 0.17.0**, a
 | `./labtex test` | Run backend tests with the installed compilers |
 
 The local server binds only to `127.0.0.1`. It is intended for your own trusted projects on your Mac. It uses Tectonic's untrusted mode, Typst's project root restriction, temporary build directories, a dedicated compiler home, and time/output limits. It does **not** provide the Linux deployment's OS sandbox or resource isolation. Keep shared/public installations on the documented Linux host. Closing the browser retains your files; the server runs until stopped, logout, or restart. Run `start` again after restarting your Mac.
+
+For everyday use without Terminal, run `./labtex desktop` once after setup. Double-click **IDSL Editor** on your Desktop to start the server and open your default browser; repeated clicks reuse the running server and its configured port. Drag the launcher into the Dock if preferred. The small native launcher lives in `~/Applications/IDSL Editor.app`, with a Desktop shortcut. It adds no login item or background watcher. It checks the installed Python and standard Homebrew/Python.org locations at launch, so Python updates or switching installations do not require recreating the shortcut. Keep the app folder in place; rerun `./labtex desktop` if you move it. For an older shortcut that broke after replacing Python, run `python3 labtex desktop` once to repair it. Installation paths stay inside the personal launcher, outside Git and source exports. Removing the launcher and shortcut does not remove projects.
 
 ## Your project home
 

@@ -58,6 +58,8 @@ Upgrading an existing installation? Run `./labtex stop`, `./labtex setup`, then 
 
 Use `./labtex stop` to stop and `./labtex start` to return later. Already cloned? Skip the clone step. For a source ZIP, use `python3 labtex` in place of `./labtex` if executable permissions were lost. [Full Mac guide →](docs/LOCAL.md)
 
+Want one-click startup? Run `./labtex desktop` once, then double-click **IDSL Editor** on your Desktop or drag it into the Dock. It starts the app and opens your browser without Terminal.
+
 ## Install on Linux
 
 Shared hosting requires x86_64 Linux, Python 3.10+, systemd, cgroup v2, and Bubblewrap. Follow the **[Linux installation guide](docs/INSTALL_LINUX.md)** for prerequisites, setup, invitations, and optional HTTPS access. The Mac runner is for personal, local use.

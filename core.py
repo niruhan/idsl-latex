@@ -6,6 +6,7 @@ from source_map import read_source_map
 MAX_FILE = 8 * 1024 * 1024
 MAX_PROJECT = 40 * 1024 * 1024
 MAX_FILES = 1000
+TYPST_PACKAGES = Path(__file__).resolve().parent / 'typst-packages'
 BUILD_LOCK = threading.Lock()
 class Problem(Exception):
     def __init__(self, message, status=400):
@@ -112,6 +113,8 @@ def compile_project(files, main):
                 command = ['latexmk', '-norc', '-pdf', '-synctex=1', '-interaction=nonstopmode', '-halt-on-error', '-no-shell-escape', '-outdir='+str(out), main]
             else: raise Problem('Unknown LATEX_ENGINE.', 503)
             env = {k:v for k,v in os.environ.items() if k in ('PATH','HOME','XDG_CACHE_HOME','LANG','SSL_CERT_FILE','SSL_CERT_DIR','FONTCONFIG_PATH','TEXFORMATS','TYPST_PACKAGE_PATH','TYPST_PACKAGE_CACHE_PATH')}
+            if engine == 'typst':
+                env.setdefault('TYPST_PACKAGE_PATH', str(TYPST_PACKAGES))
             # Local builds use a dedicated compiler home, never the account's configuration.
             if os.getenv('LABTEX_COMPILER_HOME'):
                 env['HOME'] = os.environ['LABTEX_COMPILER_HOME']

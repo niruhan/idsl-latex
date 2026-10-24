@@ -1,10 +1,14 @@
 import hashlib
 import json
+import os
+from pathlib import Path
 import shutil
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import test_app
-from core import compile_project, main_document
+from core import compile_project, main_document, unpack_zip
 from project_templates import ROOT, TEMPLATES, template_files
 
 
@@ -35,6 +39,12 @@ class TemplateTests(unittest.TestCase):
             self.assertEqual(project['name'], template['name'])
             self.assertEqual(project['main'], main_document(files))
             self.assertEqual({file['path'] for file in project['files']}, set(files))
+            if template['id'] == 'western-presentation':
+                self.assertFalse(any(path.startswith('vendor/') for path in files))
+                self.assertIn(b'"@preview/touying:0.5.3"', files['main.typ'])
+                status, archive = self.owner.call(base + '/source.zip')
+                self.assertEqual(status, 200)
+                self.assertEqual(unpack_zip(archive), files, 'Source exports contain presentation files only')
             self.assertEqual(viewer.call(base)[0], 404)
             self.assertEqual(next(p['folder'] for p in self.owner.call('/api/projects')[1]['projects'] if p['id'] == result['id']), folder)
             self.owner.call(base + '/file', 'PUT', {'path': project['main'], 'revision': 1, 'content': 'My own draft'})
@@ -58,9 +68,9 @@ class TemplateTests(unittest.TestCase):
 
     def test_bundled_upstream_files_match_recorded_hashes(self):
         manifest = json.loads((ROOT / 'upstream.json').read_text())
-        for component, directory in [('neurips', 'neurips-2026'), ('touying', 'western-presentation/vendor/touying')]:
+        for component, directory in [('neurips', ROOT / 'neurips-2026'), ('touying', ROOT.parent / 'typst-packages/preview/touying/0.5.3')]:
             for name, digest in manifest[component]['files'].items():
-                self.assertEqual(hashlib.sha256((ROOT / directory / name).read_bytes()).hexdigest(), digest, name)
+                self.assertEqual(hashlib.sha256((directory / name).read_bytes()).hexdigest(), digest, name)
 
     def test_neurips_starter_compiles_with_bibliography_and_checklist(self):
         _, files = template_files('neurips-2026')
@@ -71,19 +81,16 @@ class TemplateTests(unittest.TestCase):
         final_log = result['log'].lower().rsplit("latexmk: applying rule 'pdflatex'", 1)[-1]
         self.assertNotIn('undefined citations', final_log)
 
-    def test_western_starter_compiles_without_external_packages(self):
-        import os
+    def test_western_starter_compiles_with_shared_package_and_empty_download_cache(self):
         if not shutil.which(os.getenv('TYPST_BIN', 'typst')): self.skipTest('Typst compiler is not configured')
         _, files = template_files('western-presentation')
-        # Use an empty package directory: every needed module is in the project.
-        import tempfile
-        from unittest.mock import patch
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'TYPST_PACKAGE_PATH': folder, 'TYPST_PACKAGE_CACHE_PATH': folder}):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'TYPST_PACKAGE_CACHE_PATH': folder}):
+            os.environ.pop('TYPST_PACKAGE_PATH', None)
             result = compile_project(files, main_document(files))
+            self.assertFalse(list(Path(folder).rglob('*')), 'The bundled package must not be downloaded or copied to the cache')
         self.assertTrue(result['success'], result['log'])
 
     def test_library_starters_compile(self):
-        import os
         for template in TEMPLATES:
             if template.get('featured'): continue
             with self.subTest(template=template['id']):

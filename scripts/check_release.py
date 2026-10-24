@@ -18,7 +18,7 @@ IP = re.compile(r'(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])')
 # Public upstream author attribution, retained verbatim in these bundled files.
 UPSTREAM_CONTACTS = {
     'templates/neurips-2026/neurips_2026.sty': {'garnett' + '@' + 'wustl.edu'},
-    'templates/western-presentation/vendor/touying/LICENSE': {'orangex4' + '@' + 'qq.com'},
+    'typst-packages/preview/touying/0.5.3/LICENSE': {'orangex4' + '@' + 'qq.com'},
 }
 
 

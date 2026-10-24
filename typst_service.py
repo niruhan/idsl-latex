@@ -18,7 +18,7 @@ import threading
 import time
 import urllib.parse
 
-from core import MAX_FILE, MAX_PROJECT, Problem, safe_path
+from core import MAX_FILE, MAX_PROJECT, TYPST_PACKAGES, Problem, safe_path
 
 
 def source_range(params):
@@ -67,6 +67,7 @@ class TypstSession:
         env['HOME'] = str(home)
         env['XDG_CACHE_HOME'] = str(Path(env.get('HOME', self.root)) / '.cache')
         env['TINYMIST_LOG'] = 'error'
+        env.setdefault('TYPST_PACKAGE_PATH', str(TYPST_PACKAGES))
         try:
             self.process = subprocess.Popen([manager.binary, 'lsp'], cwd=self.root, env=env,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log, start_new_session=True)

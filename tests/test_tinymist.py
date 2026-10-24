@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 import test_app
 from typst_service import TypstSession
@@ -77,6 +78,30 @@ class TinymistTests(unittest.TestCase):
         code, result = self.owner.call(self.endpoint, 'POST', {'operation': 'query', 'method': method, 'path': 'main.typ', 'position': {'line': line, 'character': character}})
         self.assertEqual(code, 200, result)
         return result['result']
+
+    def test_western_shared_package_live_preview_and_export_with_empty_cache(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'TYPST_PACKAGE_CACHE_PATH': folder}):
+            os.environ.pop('TYPST_PACKAGE_PATH', None)
+            code, project = self.owner.call('/api/projects', 'POST', {'templateId': 'western-presentation'})
+            self.assertEqual(code, 200, project)
+            self.base = '/api/projects/' + project['id']
+            code, result = self.owner.call(self.base+'/typst', 'POST', {})
+            self.assertEqual(code, 200, result)
+            self.endpoint = self.base+'/typst/'+result['id']
+            session = self.app.typst.sessions[result['id']]
+            process = session.process.pid
+            try:
+                state = self.wait_status('CompileSuccess')
+                self.assertGreater(state['pages'], 0)
+                self.assertFalse((session.root/'vendor').exists())
+                self.assertEqual(self.owner.call(result['preview'])[0], 200)
+                self.assertTrue(self.owner.call(self.base+'/compile', 'POST', {})[1]['success'])
+                self.assertTrue(self.owner.call(self.base+'/pdf')[1].startswith(b'%PDF'))
+                self.wait_status('CompileSuccess')
+                self.assertEqual(session.process.pid, process)
+                self.assertFalse(list(Path(folder).rglob('*')), 'Live preview and export must use the shared package without downloading it')
+            finally:
+                self.owner.call(self.endpoint, 'DELETE', {})
 
     def test_real_persistent_lsp_diagnostics_recovery_watcher_pdf_and_cleanup(self):
         result = self.live_project()

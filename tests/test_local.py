@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from deploy import local
-from deploy.sandbox import sandbox_command
+from deploy.sandbox import ROOT, sandbox_command
 
 
 class LocalTests(unittest.TestCase):
@@ -38,6 +38,10 @@ class LocalTests(unittest.TestCase):
         payload = command[command.index('--') + 1:]
         self.assertEqual(payload[:2], ['/opt/tex/bin/typst', 'compile'])
         self.assertNotIn('--bundle', payload)
+        mount = command.index(str(ROOT / 'typst-packages'))
+        self.assertEqual(command[mount - 1:mount + 2], ['--ro-bind', str(ROOT / 'typst-packages'), '/opt/typst-packages'])
+        setting = command.index('TYPST_PACKAGE_PATH')
+        self.assertEqual(command[setting - 1:setting + 2], ['--setenv', 'TYPST_PACKAGE_PATH', '/opt/typst-packages'])
 
 
 if __name__ == '__main__': unittest.main()

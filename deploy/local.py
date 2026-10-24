@@ -192,16 +192,25 @@ def start(port=None):
     raise RuntimeError('Startup timed out. Run ./labtex logs.')
 
 
+def open_browser(port=None):
+    start(port)
+    subprocess.run(['/usr/bin/open',f"http://127.0.0.1:{settings()['port']}"],check=True,timeout=15)
+
+
 def main(arguments=None):
     os.umask(0o077)
     parser = argparse.ArgumentParser(description='Run the LaTeX + Typst workspace locally on your Mac.')
-    parser.add_argument('command', choices=('setup', 'start', 'stop', 'status', 'url', 'doctor', 'logs', 'setup-token', 'test', '_serve'), nargs='?', default='start')
+    parser.add_argument('command', choices=('setup', 'start', 'open', 'desktop', 'stop', 'status', 'url', 'doctor', 'logs', 'setup-token', 'test', '_serve'), nargs='?', default='start')
     parser.add_argument('--port', type=int)
     args = parser.parse_args(arguments)
     try:
         if args.command == 'setup': setup()
         elif args.command == 'doctor': doctor()
         elif args.command == 'start': start(args.port)
+        elif args.command == 'open': open_browser(args.port)
+        elif args.command == 'desktop':
+            from deploy.desktop import install
+            install(ROOT)
         elif args.command == '_serve': serve(args.port or 8765)
         elif args.command == 'stop':
             if running():
@@ -225,5 +234,5 @@ def main(arguments=None):
         elif args.command == 'test':
             subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-v'], cwd=ROOT,
                            env=dict(environment(), TEST_LATEX_ENGINE='tectonic'), check=True)
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         parser.exit(1, 'Error: ' + str(error) + '\n')
